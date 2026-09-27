@@ -10,8 +10,9 @@ from datetime import timedelta
 from itertools import count
 
 import pytest
-from aiogram.methods import GetChat, GetChatMember
-from app.db.models import AdminSubscription, Chat, LinkIntent
+from aiogram.exceptions import TelegramForbiddenError
+from aiogram.methods import EditMessageText, GetChat, GetChatMember
+from app.db.models import AdminSubscription, BotUser, Chat, LinkIntent
 from app.domain.linking import DEFAULT_EXPIRY_SECONDS, DEFAULT_LADDER
 from app.linking.deep_link import INTENT_TTL
 from sqlalchemy import select
@@ -292,6 +293,32 @@ async def test_check_again_succeeds_once_the_rights_are_fixed(
             .all()
         )
     assert left == []  # the intent was consumed by this completion
+
+
+async def test_a_linker_who_blocked_the_bot_is_marked_unreachable(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """The link itself does not depend on the Menu edit going through (§9)."""
+    await linked_menu(app, admin_id)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    app.session.script(
+        EditMessageText,
+        TelegramForbiddenError(method=None, message="Forbidden: bot was blocked by the user"),
+    )
+
+    await app.feed(
+        my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title="My Chat")
+    )
+
+    # The chat is linked regardless; only the Menu edit failed.
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.linker_id == admin_id
+    assert await stored_subscription(app.session_maker, chat_id, admin_id) is not None
+
+    async with app.session_maker() as db:
+        linker = await db.get(BotUser, admin_id)
+    assert linker is not None
+    assert linker.reachable is False  # §9: a 403 marks the Admin unreachable
 
 
 async def test_an_expired_token_links_nothing(app: TestApp, admin_id: int, chat_id: int) -> None:
