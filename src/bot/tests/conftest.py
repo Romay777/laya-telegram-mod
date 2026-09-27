@@ -6,12 +6,20 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 
+from app.db.migrate import run_migrations
+
 
 @pytest.fixture(scope="session")
 def postgres_url() -> Iterator[str]:
     """A real Postgres 17, reachable over asyncpg."""
     with PostgresContainer("postgres:17", driver="asyncpg") as postgres:
         yield postgres.get_connection_url()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _migrated_schema(postgres_url: str) -> None:
+    """Give every test the migrated schema, as the bot would have on start."""
+    run_migrations(postgres_url)
 
 
 @pytest.fixture(scope="session")
