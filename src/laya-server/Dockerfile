@@ -55,16 +55,30 @@ snapshot_download(
 print("downloaded multilingual checkpoint at", os.environ["LAYA_REVISION"])
 EOF
 
-# Export fp32 ONNX, then the Laya repo's own script writes the INT8
-# weight-only quantized copy next to it (`--quantize`).
+# Export fp32 ONNX in its own torch process, then run the Laya repo's INT8
+# quantizer in a fresh, torch-free process: export and quantize in one
+# process peaked past the memory a Docker Desktop VM grants (4.8 GB here) and
+# was OOM-killed; apart, each step fits.
 RUN python /laya-repo/scripts/export_onnx.py \
     --model /ckpt/multilingual \
-    --output /export/laya.onnx \
-    --quantize
+    --output /export/laya.onnx
+
+# The Laya script's quantize_model loads the fp32 graph and hands ORT's
+# quantize_dynamic a ModelProto, which makes ORT deepcopy the whole ~650 MB
+# graph; in a 4.8 GB Docker Desktop VM that step was OOM-killed. These two
+# RUNs make the identical onnxruntime calls with the script's identical
+# arguments (del value_info, MatMul-only, QInt8, per-channel), minus the
+# in-memory copy: quantize_dynamic gets a path, so ORT streams shape
+# inference through infer_shapes_path instead of copying the graph.
+RUN python -c "import onnx; m = onnx.load('/export/laya.onnx'); del m.graph.value_info[:]; onnx.save(m, '/export/laya.novi.onnx'); del m" \
+    && rm -f /export/laya.onnx
+
+RUN python -c "from onnxruntime.quantization import QuantType, quantize_dynamic; quantize_dynamic('/export/laya.novi.onnx', '/export/laya.int8.onnx', op_types_to_quantize=['MatMul'], weight_type=QuantType.QInt8, per_channel=True)" \
+    && rm -f /export/laya.novi.onnx
 
 # Keep only the runtime artefacts: the INT8 ONNX graph, the config and the
-# tokenizer. The fp32 ONNX file, the fp32 safetensors and the rest of the HF
-# snapshot stay in this stage.
+# tokenizer. The intermediate fp32 files, the fp32 safetensors and the rest
+# of the HF snapshot stay in this stage.
 RUN mkdir -p /out/multilingual/tokenizer \
     && cp /export/laya.int8.onnx /out/multilingual/ \
     && cp /ckpt/multilingual/rl_agent_config.json /out/multilingual/ \

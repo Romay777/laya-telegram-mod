@@ -25,7 +25,7 @@ Laya gets its own process because the model is heavy: about 1–2 GB of RAM and 
 - When overloaded, the bot skips checks rather than queueing them. Deleting a message minutes after it was sent is worse than missing one spam message.
 - If Jev fails, the bot falls back to Laya when it is deployed and otherwise skips the check.
 - The Laya container is a Compose profile that is enabled by default. An Instance can run with Jev only.
-- The Laya image is large (≈1 GB).
+- The Laya image is large. Measured at build time (arm64, torch 2.14 CPU, laya 0.3.21): 3.78 GB, of which the CPU torch wheel is the bulk and the quantized checkpoint 916 MB (the INT8 graph quantizes the 98 MatMul weights; the 256k-vocabulary embeddings and every non-MatMul op stay fp32, so "INT8" does not mean a 4x smaller model).
 - Versions are pinned because Sensitivity thresholds are tuned per backend version:
   - Laya is pinned by package version (`laya==0.3.21`, the first release that supports revision pinning) and by weight revision.
   - Jev is pinned to a model version, not `jev-latest`.
