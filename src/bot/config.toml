@@ -1,0 +1,62 @@
+# Tunables with defaults (ARCHITECTURE §3). Operators normally never touch
+# this file; override it by mounting. Starting thresholds are the same for
+# laya and jev and are not calibrated.
+
+[thresholds.laya.lenient]
+violation = 0.95
+suspicion = 0.75
+
+[thresholds.laya.balanced]
+violation = 0.90
+suspicion = 0.60
+
+[thresholds.laya.strict]
+violation = 0.80
+suspicion = 0.50
+
+[thresholds.jev.lenient]
+violation = 0.95
+suspicion = 0.75
+
+[thresholds.jev.balanced]
+violation = 0.90
+suspicion = 0.60
+
+[thresholds.jev.strict]
+violation = 0.80
+suspicion = 0.50
+
+[signals]
+new_member_link = -0.10
+invite_link = -0.05
+established_member = 0.05
+
+[classifier]
+timeout_s = 3
+max_concurrency = 4
+health_interval_s = 60
+
+[moderation]
+min_words = 3
+new_member_hours = 24
+new_member_messages = 3
+
+[notices]
+per_second = 1
+per_minute = 18
+max_queue_age_s = 300
+max_lifetime_h = 24
+outcome_visible_s = 600
+
+[suspicions]
+auto_close_h = 24
+
+[observation]
+summary_after_h = 48
+
+[retention]
+flagged_text_days = 30
+removed_chat_days = 30
+
+[admin_cache]
+ttl_s = 300
