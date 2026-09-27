@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: laya
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d laya"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  bot:
+    build: ./src/bot
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      # Compose builds DATABASE_URL; it is not an Operator setting (§3).
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-}@postgres:5432/laya
+      JEV_API_KEY: ${JEV_API_KEY:-}
+      JEV_BASE_URL: ${JEV_BASE_URL:-https://api.typesafe.ai/v1}
+      JEV_MODEL: ${JEV_MODEL:-jev-1.13.0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
