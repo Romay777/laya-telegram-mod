@@ -2,7 +2,6 @@
 
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser
@@ -22,7 +21,3 @@ class BotUserRepository:
             self.session.add(user)
             await self.session.flush()
         return user
-
-    async def all_started(self) -> list[BotUser]:
-        rows = await self.session.execute(select(BotUser))
-        return list(rows.scalars())

@@ -12,7 +12,7 @@ from aiogram.methods import EditMessageText
 from app.db.models import BotUser
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tests.support.app import FIXED_NOW, TestApp, app_fixture, build_app
+from tests.support.harness import FIXED_NOW, TestApp, app_fixture, build_app
 from tests.support.updates import private_callback_update, start_update
 
 # The Postgres container is shared, so every test talks to the bot as a
@@ -31,7 +31,9 @@ async def app(postgres_url: str) -> AsyncIterator[TestApp]:
         yield app
 
 
-async def row(session_maker: async_sessionmaker[AsyncSession], user_id: int) -> BotUser | None:
+async def stored_user(
+    session_maker: async_sessionmaker[AsyncSession], user_id: int
+) -> BotUser | None:
     async with session_maker() as db:
         return await db.get(BotUser, user_id)
 
@@ -44,7 +46,7 @@ async def test_start_of_a_new_user_shows_the_language_screen(app: TestApp, admin
     assert sent.text == "Выберите язык"  # the Telegram client language, before any choice
     assert app.session.calls_of("SendMessage")[0].result.message_id > 0
 
-    user = await row(app.session_maker, admin_id)
+    user = await stored_user(app.session_maker, admin_id)
     assert user is not None
     assert user.started_at == FIXED_NOW  # time comes from the Clock
     assert user.language is None  # not chosen yet
@@ -71,7 +73,7 @@ async def test_language_choice_edits_the_same_message_into_home(
     assert edit.chat_id == admin_id
     assert edit.text == "Menu"
 
-    user = await row(app.session_maker, admin_id)
+    user = await stored_user(app.session_maker, admin_id)
     assert user is not None
     assert user.language == "en"  # the choice is stored
 
@@ -124,7 +126,7 @@ async def test_language_switch_from_home_renders_every_menu_string_in_ru(
     assert language.text == "Язык"
     assert how_it_works.text == "Как это работает"
 
-    user = await row(app.session_maker, admin_id)
+    user = await stored_user(app.session_maker, admin_id)
     assert user is not None
     assert user.language == "ru"
 
