@@ -3,10 +3,9 @@
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
+from app.db.migrate import run_migrations
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from testcontainers.community.postgres import PostgresContainer
-
-from app.db.migrate import run_migrations
 
 
 @pytest.fixture(scope="session")

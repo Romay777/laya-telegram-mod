@@ -6,9 +6,8 @@ here is a fresh storage instance over the same database (§17).
 
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.base import StorageKey
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from app.db.fsm_storage import PostgresStorage
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 KEY = StorageKey(bot_id=42, chat_id=100, user_id=1, destiny="default")
 OTHER_KEY = StorageKey(bot_id=42, chat_id=100, user_id=2, destiny="default")

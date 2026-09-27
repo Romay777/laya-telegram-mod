@@ -1,9 +1,8 @@
 """Seam: the migration runner. `run_migrations` brings a real Postgres to head."""
 
+from app.db.migrate import run_migrations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
-
-from app.db.migrate import run_migrations
 
 SKELETON_TABLES = ["bot_user", "fsm_state"]
 
