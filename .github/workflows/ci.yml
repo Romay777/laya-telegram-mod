@@ -29,3 +29,21 @@ jobs:
 
       - name: Tests
         run: uv run pytest
+
+  laya-server:
+    # Unit tests for src/laya-server run without Docker: they exercise the
+    # HTTP contract and router registration seams against laya.serve with a
+    # scripted agent (no model download, no image build).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/laya-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --python 3.12
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q

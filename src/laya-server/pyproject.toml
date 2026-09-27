@@ -1,0 +1,22 @@
+[project]
+name = "laya-server"
+version = "0.1.0"
+description = "Local Laya inference service: the multilingual checkpoint as INT8 ONNX behind laya-serve, reachable only on the internal Docker network."
+requires-python = ">=3.12"
+dependencies = [
+    "laya[serve,onnx]==0.3.21",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

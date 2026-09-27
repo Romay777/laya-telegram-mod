@@ -215,7 +215,7 @@ This is a multi-stage build:
 2. **Runtime stage.**
    - Keeps the INT8 `.onnx` file, the config and the tokenizer.
    - `app.py` builds `ONNXAgent(onnx_path=…, subfolder="multilingual")`, attaches it to a `Router` as `multilingual`, and serves `laya.serve.create_app(router=…)` on port 8000.
-   - `laya.common` imports torch, so the runtime stage probably still needs the CPU torch wheel. The implementation should verify this, and drop torch if it isn't needed.
+   - The runtime stage needs the CPU torch wheel (verified, see ADR-0002): `laya.common` imports torch at module level and `laya.onnx_agent` imports `laya.common`, so the ONNX path does not work without it. The CPU wheel is installed before `laya[serve,onnx]`, so pip keeps it instead of resolving the CUDA-stacked default.
 
 `laya-serve`'s `/health` is used as the Compose healthcheck. No port is published, and `LAYA_API_KEY` is not set, because the service is reachable only on the internal network.
 
