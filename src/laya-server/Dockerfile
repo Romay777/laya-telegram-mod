@@ -90,6 +90,10 @@ RUN mkdir -p /out/multilingual/tokenizer \
 ##############################################################################
 FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 
+# Same pin as the builder stage (global ARGs only reach FROM lines, so it is
+# redeclared here).
+ARG LAYA_PACKAGE_VERSION=0.3.21
+
 # torch is needed at run time: laya.common (imported by laya.onnx_agent at
 # module level) and laya.agent (imported by ONNXAgent to reuse its question
 # validation) both `import torch` unconditionally. Verified: an environment
@@ -97,7 +101,7 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 # `ModuleNotFoundError: No module named 'torch'`. See ADR-0002.
 RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-RUN pip install "laya[serve,onnx]==0.3.21"
+RUN pip install "laya[serve,onnx]==${LAYA_PACKAGE_VERSION}"
 
 RUN useradd --system --uid 10001 --home-dir /nonexistent laya
 

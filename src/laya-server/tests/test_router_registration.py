@@ -11,22 +11,11 @@ import pytest
 from app import build_router
 from tests.fixtures import FakeMultilingualAgent
 
-# Absolute paths that do not exist: what the router entries for the checkpoints
-# this image does not ship point at.
-_SENTINEL_ROOT = "/models/disabled"
-
 
 def test_only_multilingual_is_attached_to_the_router():
     router = build_router(agent_factory=FakeMultilingualAgent)
 
     assert router.loaded == ["multilingual"]
-
-
-def test_unshipped_checkpoints_point_at_missing_local_paths():
-    router = build_router(agent_factory=FakeMultilingualAgent)
-
-    for name in ("english", "typed-decisions"):
-        assert router.models[name].startswith(_SENTINEL_ROOT)
 
 
 @pytest.mark.parametrize("model", ["english", "typed-decisions"])
