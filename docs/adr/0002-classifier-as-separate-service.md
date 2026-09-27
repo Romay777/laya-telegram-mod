@@ -9,6 +9,8 @@ Categories are described once, as a versioned question spec in the bot's code. T
 
 Laya runs in its own container (`src/laya-server/`). It is a thin wrapper around `laya-serve` that loads the `multilingual/` checkpoint as INT8 ONNX. The weights are downloaded at a pinned HF revision and exported to ONNX at image build time, so they are baked into the image. The container has no published port and is reachable only on the internal Docker network.
 
+**Torch stays in the runtime image (verified).** The ONNX runtime path needs torch installed: `laya.onnx_agent` imports `laya.common` at module level, and `laya/common.py` does `import torch` (line 12) outside any lazy hook; `ONNXAgent` also imports `laya.agent` (torch-backed) for tokenizer fixing and question validation, and `laya`'s own package metadata requires `torch>=2.0.0` unconditionally. Verified empirically against laya 0.3.21 in an environment that had `laya`, `onnxruntime` and `transformers` but no torch: `import laya.onnx_agent` fails with `ModuleNotFoundError: No module named 'torch'` (chain `laya/onnx_agent.py:15 → laya/common.py:12`). The runtime stage therefore installs the CPU-only torch wheel (`pip install torch --index-url https://download.pytorch.org/whl/cpu`, done before `laya[serve,onnx]` so pip keeps it), and dropping torch entirely is not possible without forking the package.
+
 Laya gets its own process because the model is heavy: about 1–2 GB of RAM and ~200 ms of CPU time per question. Inside aiogram it would block the event loop.
 
 ## Considered Options

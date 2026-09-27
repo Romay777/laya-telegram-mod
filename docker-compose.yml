@@ -1,0 +1,68 @@
+# Deployment for one Instance (ARCHITECTURE §16). All services share the
+# internal `internal` network and no ports are published.
+#
+# The `laya` service is gated by the Compose profile `laya`, which is enabled
+# by default through COMPOSE_PROFILES=laya in `.env`. Removing that line runs
+# the Instance with Jev only.
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - internal
+
+  laya:
+    build:
+      context: ./src/laya-server
+      args:
+        # Pinned revision of convaiinnovations/laya the weights are exported
+        # from (ARCHITECTURE §5: `55cf4c4e…`).
+        LAYA_REVISION: 55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851
+    profiles:
+      - laya
+    # The INT8 ONNX checkpoint takes 1–2 GB of RAM (ADR-0002).
+    mem_limit: 3g
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    networks:
+      - internal
+
+  bot:
+    build: ./src/bot
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?set BOT_TOKEN in .env}
+      # Compose builds the database URL and the internal Laya URL; neither is
+      # an Operator setting (ARCHITECTURE §3).
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      LAYA_BASE_URL: http://laya:8000/v1
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
