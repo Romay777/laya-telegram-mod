@@ -4,6 +4,7 @@ The promotion is a fabricated `my_chat_member` Update; assertions only look at
 the recorded Bot API calls and the DB state (§17).
 """
 
+import asyncio
 from collections.abc import AsyncIterator, Iterator
 from datetime import timedelta
 from itertools import count
@@ -54,6 +55,13 @@ def second_chat_id() -> Iterator[int]:
 @pytest.fixture
 async def app(postgres_url: str) -> AsyncIterator[TestApp]:
     async with app_fixture(postgres_url) as app:
+        yield app
+
+
+@pytest.fixture
+async def quick_app(postgres_url: str) -> AsyncIterator[TestApp]:
+    """The same app with a 50 ms prompt lifetime, so self-deletion is observable."""
+    async with app_fixture(postgres_url, prompt_delete_after_s=0.05) as app:
         yield app
 
 
@@ -287,7 +295,7 @@ async def test_check_again_succeeds_once_the_rights_are_fixed(
 
 
 async def test_an_expired_token_links_nothing(app: TestApp, admin_id: int, chat_id: int) -> None:
-    """The intent is valid for one hour; a promotion after that is not a Linking."""
+    """The intent is valid for one hour; a promotion after that links nothing."""
     await linked_menu(app, admin_id)
     app.clock.advance(timedelta(hours=1, seconds=1))
     app.session.script(GetChatMember, member_owner(user(admin_id)))
@@ -296,9 +304,10 @@ async def test_an_expired_token_links_nothing(app: TestApp, admin_id: int, chat_
         my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title="My Chat")
     )
 
-    # Without a valid intent the promotion is not a Linking attempt at all:
-    # no checks, no live calls, no Menu change.
-    assert app.session.call_names() == []
+    # The checks ran, but the single-use token was spent by the clock:
+    # no Menu change and no Linked Chat.
+    assert app.session.call_names() == ["GetChatMember"]
+    assert app.session.calls_of("EditMessageText") == []
     assert await stored_chat(app.session_maker, chat_id) is None
 
 
@@ -315,11 +324,12 @@ async def test_a_used_token_is_not_asked_for_twice(
     app.session.calls.clear()
 
     # The same Admin adds the bot to another group without pressing Add to chat again.
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
     await app.feed(
         my_chat_member_update(second_chat_id, "supergroup", linker_id=admin_id, title="Other")
     )
 
-    assert app.session.calls == []  # the used token is not asked for twice
+    assert app.session.calls_of("EditMessageText") == []  # no Menu change
     assert await stored_chat(app.session_maker, second_chat_id) is None
     assert await stored_subscription(app.session_maker, second_chat_id, admin_id) is None
 
@@ -356,3 +366,69 @@ async def test_check_again_after_the_intent_expired_offers_a_new_link(
     (back,) = edit.reply_markup.inline_keyboard[0]
     assert back.callback_data == "menu:home:"
     assert await stored_chat(app.session_maker, chat_id) is None
+
+
+async def test_a_linker_who_never_started_is_prompted_in_the_group(
+    quick_app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """Someone who added the bot without ever opening it cannot be messaged (§10 step 6)."""
+    quick_app.session.script(GetChatMember, member_owner(user(admin_id)))
+
+    await quick_app.feed(
+        my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title="My Chat")
+    )
+
+    assert quick_app.session.call_names() == ["GetChatMember", "GetMe", "SendMessage"]
+    sent = quick_app.session.calls_of("SendMessage")[0].method
+    assert sent.chat_id == chat_id  # one message, in the group
+    assert "Start" in (sent.text or "")
+    assert "@laya_moderator_bot" in (sent.text or "")  # where to open the bot
+    prompt_message_id = quick_app.session.calls_of("SendMessage")[0].result.message_id
+
+    # Nothing is linked yet: linking waits for their /start.
+    assert await stored_chat(quick_app.session_maker, chat_id) is None
+
+    # The prompt deletes itself (the harness shrinks the 10 minutes to 50 ms).
+    await asyncio.sleep(0.2)
+    (delete,) = quick_app.session.calls_of("DeleteMessage")
+    assert (delete.method.chat_id, delete.method.message_id) == (chat_id, prompt_message_id)
+
+
+async def test_linking_completes_when_the_prompted_linker_presses_start(
+    quick_app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    quick_app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await quick_app.feed(
+        my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title="My Chat")
+    )
+    quick_app.session.calls.clear()
+
+    # The Linker opens the bot and presses /start; the checks run once more.
+    quick_app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    quick_app.session.script(GetChatMember, member_administrator(BOT_USER))
+    quick_app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await quick_app.feed(start_update(admin_id, "en"))
+
+    assert quick_app.session.call_names() == [
+        "GetChat",
+        "GetChatMember",
+        "GetChatMember",
+        "SendMessage",
+    ]
+    chat = await stored_chat(quick_app.session_maker, chat_id)
+    assert chat is not None
+    assert chat.linker_id == admin_id
+    subscription = await stored_subscription(quick_app.session_maker, chat_id, admin_id)
+    assert subscription is not None and subscription.alert_mode == "all"
+
+    # The normal /start flow continues: a first-timer sees the language screen.
+    (language_screen,) = quick_app.session.calls_of("SendMessage")
+    assert language_screen.method.chat_id == admin_id
+    assert language_screen.method.text == "Choose your language"
+
+    # The pending link was consumed: another /start is the ordinary flow.
+    quick_app.session.calls.clear()
+    await quick_app.feed(start_update(admin_id, "en"))
+    names = quick_app.session.call_names()
+    assert "GetChat" not in names  # nothing left to re-check
+    assert names == ["EditMessageText"]  # the ordinary /start: the Menu is re-edited

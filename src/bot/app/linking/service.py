@@ -18,22 +18,28 @@ from typing import cast
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import ChatMemberUpdated
+from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.clock import Clock
+from app.db.fsm_storage import PostgresStorage
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.link_intents import LinkIntentRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.db.repositories.users import BotUserRepository
 from app.domain.linking import linking_problems
-from app.i18n import guess_locale
+from app.i18n import guess_locale, translator_for
 from app.linking.deep_link import INTENT_TTL, startgroup_url
 from app.menu.navigator import MenuNavigator
 
 #: The interface language a Linked Chat gets when the Linker never picked one.
 FALLBACK_LANGUAGE = "en"
+
+#: The FSM destiny under which a deferred Linking waits for the Linker's /start.
+LINKING_DESTINY = "linking"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +53,7 @@ class PromotionFacts:
     can_restrict_members: bool
     linker_id: int
     linker_status: str | None
+    linker_first_name: str | None = None
 
 
 class LinkingService:
@@ -55,10 +62,13 @@ class LinkingService:
         *,
         session_maker: async_sessionmaker[AsyncSession],
         clock: Clock,
+        core: BaseCore,
         prompt_delete_after_s: float = 600.0,
     ) -> None:
         self._session_maker = session_maker
         self._clock = clock
+        self._core = core
+        self._storage = PostgresStorage(session_maker)
         self._prompt_delete_after_s = prompt_delete_after_s
         self._deletion_tasks: set[asyncio.Task[None]] = set()
 
@@ -73,7 +83,7 @@ class LinkingService:
         )
         return startgroup_url(cast(str, me.username), token)
 
-    async def delete_prompt_later(self, bot: Bot, chat_id: int, message_id: int) -> None:
+    def delete_prompt_later(self, bot: Bot, chat_id: int, message_id: int) -> None:
         """Delete the group prompt after its 10 minutes (§10 step 6).
 
         In-process on purpose: when the scheduler (§11) lands, this due
@@ -100,15 +110,13 @@ class LinkingService:
     ) -> None:
         """A `my_chat_member` update made the bot an administrator (§10 step 2+).
 
-        An expired or reused token means this promotion is not a Linking
-        attempt and is ignored outright. Otherwise the three checks run in
-        order; on success the intent is consumed and the chat linked, on
-        failure the Admin's Menu lists what is missing.
+        The three checks run in order. On success the intent is consumed and
+        the chat linked; on failure the Admin's Menu lists what is missing. An
+        expired or reused token links nothing (§10: the token is single use).
+        A Linker who never started the bot cannot be messaged, so the linking
+        is deferred to their /start behind a group prompt (§10 step 6).
         """
         linker_id = event.from_user.id
-        if await LinkIntentRepository(session).find_valid(linker_id, now=self._clock.now()) is None:
-            return  # expired or reused token
-
         chat_type = event.chat.type
         # Check 3 needs a live `getChatMember`; an earlier failing check means
         # it does not run (§10 step 3: the checks run in order).
@@ -127,6 +135,7 @@ class LinkingService:
             ),
             linker_id=linker_id,
             linker_status=linker_status,
+            linker_first_name=event.from_user.first_name,
         )
         problems = linking_problems(
             chat_type=facts.chat_type,
@@ -156,8 +165,11 @@ class LinkingService:
             await self._defer_to_group_prompt(bot, facts, telegram_language_code)
             return
 
-        # Single use: taken out only now, when the link really completes.
-        await LinkIntentRepository(session).consume_valid(linker_id, now=self._clock.now())
+        # Single use: taken out only now, when the link really completes. An
+        # expired or reused token links nothing.
+        intent = await LinkIntentRepository(session).consume_valid(linker_id, now=self._clock.now())
+        if intent is None:
+            return
 
         chat = await self._complete_link(
             session, facts, chat_language=linker.language or FALLBACK_LANGUAGE
@@ -302,4 +314,62 @@ class LinkingService:
     async def _defer_to_group_prompt(
         self, bot: Bot, facts: PromotionFacts, telegram_language_code: str | None
     ) -> None:
-        raise NotImplementedError  # slice 10
+        """The Linker never started the bot: prompt them in the group (§10 step 6).
+
+        The pending chat is remembered under the Linker's FSM destiny, so their
+        /start can finish the linking.
+        """
+        t = translator_for(self._core, guess_locale(telegram_language_code))
+        me = await bot.get_me()
+        prompt = await bot.send_message(
+            chat_id=facts.chat_id,
+            text=t(
+                "link-group-prompt",
+                name=facts.linker_first_name or "",
+                bot_username=me.username or "",
+            ),
+        )
+        await self._storage.set_data(
+            self._pending_key(bot, facts.linker_id),
+            {"chat_id": facts.chat_id, "chat_title": facts.chat_title or ""},
+        )
+        self.delete_prompt_later(bot, facts.chat_id, prompt.message_id)
+
+    async def complete_pending_start(
+        self, *, bot: Bot, session: AsyncSession, user: BotUser
+    ) -> None:
+        """Finish a deferred Linking when the prompted Linker presses /start (§10 step 6).
+
+        The same checks run once more; a chat that went away or now fails them
+        just clears the pending state, and /start carries on as usual.
+        """
+        key = self._pending_key(bot, user.user_id)
+        data = await self._storage.get_data(key)
+        chat_id = data.get("chat_id")
+        if not chat_id:
+            return
+
+        await self._storage.set_data(key, {})  # the attempt is spent either way
+        try:
+            facts = await self._facts_live(bot, int(chat_id), user.user_id)
+        except TelegramAPIError:
+            return  # the chat is gone or the bot was removed
+        problems = linking_problems(
+            chat_type=facts.chat_type,
+            can_delete_messages=facts.can_delete_messages,
+            can_restrict_members=facts.can_restrict_members,
+            linker_status=facts.linker_status,
+        )
+        if problems:
+            return
+
+        await self._complete_link(session, facts, chat_language=user.language or FALLBACK_LANGUAGE)
+
+    def _pending_key(self, bot: Bot, user_id: int) -> StorageKey:
+        return StorageKey(
+            bot_id=bot.id,
+            chat_id=user_id,
+            user_id=user_id,
+            thread_id=0,
+            destiny=LINKING_DESTINY,
+        )

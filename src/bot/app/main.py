@@ -39,6 +39,7 @@ def build_dispatcher(
     linking = LinkingService(
         session_maker=session_maker,
         clock=clock,
+        core=i18n.core,
         prompt_delete_after_s=prompt_delete_after_s,
     )
     dispatcher = Dispatcher(storage=PostgresStorage(session_maker))

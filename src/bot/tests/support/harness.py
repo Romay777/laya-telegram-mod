@@ -81,8 +81,10 @@ async def build_app(postgres_url: str, *, prompt_delete_after_s: float = 600.0) 
 
 
 @asynccontextmanager
-async def app_fixture(postgres_url: str) -> AsyncIterator[TestApp]:
-    app = await build_app(postgres_url)
+async def app_fixture(
+    postgres_url: str, *, prompt_delete_after_s: float = 600.0
+) -> AsyncIterator[TestApp]:
+    app = await build_app(postgres_url, prompt_delete_after_s=prompt_delete_after_s)
     try:
         yield app
     finally:

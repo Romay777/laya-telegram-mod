@@ -25,8 +25,12 @@ def create_private_router() -> Router:
         session: AsyncSession,
         bot_user: BotUser,
         navigator: MenuNavigator,
+        linking: LinkingService,
         i18n: I18nContext,
     ) -> None:
+        # A deferred Linking (the Linker was prompted in the group) finishes here.
+        await linking.complete_pending_start(bot=bot, session=session, user=bot_user)
+
         if bot_user.language is None:
             await navigator.show_language_screen(
                 bot=bot,
