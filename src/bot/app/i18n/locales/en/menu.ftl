@@ -12,3 +12,12 @@ menu-how-it-works-text = Laya checks every message in your Linked Chats with an 
 
 menu-add-chat-text = Open the group picker and add me to a group as an administrator. Telegram pre-fills the two rights I need; once that is done, I will check everything and report back here.
 menu-add-chat-open-picker = 🔵 Open the group picker
+menu-link-success = ✅ {$chat} linked
+menu-chat-mode = Mode: {$mode}
+menu-chat-backend = Backend: {$backend}
+menu-chat-sensitivity = Sensitivity: {$sensitivity}
+chat-mode-observation = Observation Mode
+chat-mode-auto = Auto-moderation
+chat-sensitivity-lenient = Lenient
+chat-sensitivity-balanced = Balanced
+chat-sensitivity-strict = Strict

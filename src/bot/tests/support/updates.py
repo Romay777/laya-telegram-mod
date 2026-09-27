@@ -21,6 +21,11 @@ def _user(user_id: int, language_code: str | None) -> User:
     return User(id=user_id, is_bot=False, first_name="Admin", language_code=language_code)
 
 
+def user(user_id: int, language_code: str | None = None) -> User:
+    """A Telegram user for scripted getChatMember answers and the like."""
+    return _user(user_id, language_code)
+
+
 def _private_chat_message(
     user_id: int, message_id: int, language_code: str | None, text: str | None = None
 ) -> Message:

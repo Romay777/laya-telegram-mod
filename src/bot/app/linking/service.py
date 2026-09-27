@@ -13,16 +13,40 @@ One entry point per way the flow moves:
 import asyncio
 import contextlib
 import secrets
+from dataclasses import dataclass
 from typing import cast
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
+from aiogram.types import ChatMemberUpdated
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.clock import Clock
-from app.db.models import BotUser
+from app.db.models import BotUser, Chat
+from app.db.repositories.chats import ChatRepository
 from app.db.repositories.link_intents import LinkIntentRepository
+from app.db.repositories.subscriptions import AdminSubscriptionRepository
+from app.db.repositories.users import BotUserRepository
+from app.domain.linking import linking_problems
+from app.i18n import guess_locale
 from app.linking.deep_link import INTENT_TTL, startgroup_url
+from app.menu.navigator import MenuNavigator
+
+#: The interface language a Linked Chat gets when the Linker never picked one.
+FALLBACK_LANGUAGE = "en"
+
+
+@dataclass(frozen=True, slots=True)
+class PromotionFacts:
+    """What one promotion attempt knows about the chat, the bot and the Linker."""
+
+    chat_id: int
+    chat_title: str | None
+    chat_type: str
+    can_delete_messages: bool
+    can_restrict_members: bool
+    linker_id: int
+    linker_status: str | None
 
 
 class LinkingService:
@@ -64,3 +88,140 @@ class LinkingService:
         task = asyncio.create_task(delete_later())
         self._deletion_tasks.add(task)
         task.add_done_callback(self._deletion_tasks.discard)
+
+    async def handle_promotion(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        navigator: MenuNavigator,
+        event: ChatMemberUpdated,
+        telegram_language_code: str | None,
+    ) -> None:
+        """A `my_chat_member` update made the bot an administrator (§10 step 2+).
+
+        The three checks run in order; on success the intent is consumed and
+        the chat linked, on failure the Admin's Menu lists what is missing. An
+        expired or reused token means this promotion is not a Linking attempt.
+        """
+        linker_id = event.from_user.id
+        facts = PromotionFacts(
+            chat_id=event.chat.id,
+            chat_title=event.chat.title,
+            chat_type=event.chat.type,
+            can_delete_messages=bool(getattr(event.new_chat_member, "can_delete_messages", False)),
+            can_restrict_members=bool(
+                getattr(event.new_chat_member, "can_restrict_members", False)
+            ),
+            linker_id=linker_id,
+            linker_status=await self._member_status(bot, event.chat.id, linker_id),
+        )
+        problems = linking_problems(
+            chat_type=facts.chat_type,
+            can_delete_messages=facts.can_delete_messages,
+            can_restrict_members=facts.can_restrict_members,
+            linker_status=facts.linker_status,
+        )
+
+        linker = await BotUserRepository(session).get(linker_id)
+        locale = self._locale(linker, telegram_language_code)
+        if problems:
+            # Without a bot_user there is no Menu to report into (§10 step 6).
+            if linker is not None:
+                await navigator.show_link_failed(
+                    bot=bot,
+                    session=session,
+                    user=linker,
+                    chat_title=facts.chat_title,
+                    chat_id=facts.chat_id,
+                    problems=problems,
+                    locale=locale,
+                )
+            return
+
+        if linker is None:
+            # The Linker cannot be messaged yet: linking waits for their /start.
+            await self._defer_to_group_prompt(bot, facts, telegram_language_code)
+            return
+
+        intent = await LinkIntentRepository(session).consume_valid(linker_id, now=self._clock.now())
+        if intent is None:
+            return  # expired or reused token
+
+        chat = await self._complete_link(
+            session, facts, chat_language=linker.language or FALLBACK_LANGUAGE
+        )
+        await self._show_linked(
+            bot,
+            session,
+            navigator,
+            linker,
+            facts,
+            chat.mode,
+            chat.backend,
+            chat.sensitivity,
+            locale,
+        )
+
+    async def _member_status(self, bot: Bot, chat_id: int, user_id: int) -> str | None:
+        """The membership status `getChatMember` reports, or None when unknown."""
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+        except TelegramAPIError:
+            return None
+        return member.status
+
+    def _locale(self, linker: BotUser | None, telegram_language_code: str | None) -> str:
+        """The Linker's interface language (§15), before any choice the client one."""
+        if linker is not None and linker.language:
+            return linker.language
+        return guess_locale(telegram_language_code)
+
+    async def _complete_link(
+        self, session: AsyncSession, facts: PromotionFacts, *, chat_language: str
+    ) -> Chat:
+        """Create the Linked Chat with the §12 defaults and the Linker's subscription."""
+        chat = await ChatRepository(session).create_linked(
+            chat_id=facts.chat_id,
+            title=facts.chat_title,
+            linker_id=facts.linker_id,
+            linked_at=self._clock.now(),
+            chat_language=chat_language,
+        )
+        await AdminSubscriptionRepository(session).set_mode(
+            chat.chat_id, user_id=facts.linker_id, alert_mode="all"
+        )
+        return chat
+
+    async def _show_linked(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        navigator: MenuNavigator,
+        linker: BotUser,
+        facts: PromotionFacts,
+        mode: str,
+        backend: str,
+        sensitivity: str,
+        locale: str,
+    ) -> None:
+        try:
+            await navigator.show_linked_chat(
+                bot=bot,
+                session=session,
+                user=linker,
+                chat_title=facts.chat_title,
+                mode=mode,
+                backend=backend,
+                sensitivity=sensitivity,
+                locale=locale,
+            )
+        except TelegramForbiddenError:
+            # The Linker blocked the bot; §9 marks them unreachable.
+            linker.reachable = False
+            await session.flush()
+
+    async def _defer_to_group_prompt(
+        self, bot: Bot, facts: PromotionFacts, telegram_language_code: str | None
+    ) -> None:
+        raise NotImplementedError  # slice 10

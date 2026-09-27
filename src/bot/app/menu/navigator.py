@@ -16,7 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import BotUser
 from app.i18n import translator_for
 from app.menu.screen import Screen
-from app.menu.screens import add_chat_screen, home_screen, how_it_works_screen, language_screen
+from app.menu.screens import (
+    add_chat_screen,
+    home_screen,
+    how_it_works_screen,
+    language_screen,
+    linked_chat_screen,
+)
 
 
 class MenuNavigator:
@@ -68,6 +74,31 @@ class MenuNavigator:
             session=session,
             user=user,
             screen=add_chat_screen(translator_for(self.core, locale), url),
+        )
+
+    async def show_linked_chat(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_title: str | None,
+        mode: str,
+        backend: str,
+        sensitivity: str,
+        locale: str,
+    ) -> None:
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=linked_chat_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                mode=mode,
+                backend=backend,
+                sensitivity=sensitivity,
+            ),
         )
 
     async def _show(
