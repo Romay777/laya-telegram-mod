@@ -1,16 +1,18 @@
 """SQLAlchemy models for the persistent state of the Instance.
 
-Only the tables the walking skeleton needs live here so far; later tickets add
-their own tables in new Alembic revisions (see ARCHITECTURE §12 for the full
-data model).
+Tables land with the tickets that need them, in new Alembic revisions; this
+file keeps the §12 shapes. All timestamps are `timestamptz`, every chat-scoped
+table carries `chat_id` with ON DELETE CASCADE (ADR-0001).
 """
 
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, String
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.domain.linking import DEFAULT_LADDER, DEFAULT_EXPIRY_SECONDS
 
 
 class Base(DeclarativeBase):
@@ -47,3 +49,85 @@ class FsmState(Base):
     destiny: Mapped[str] = mapped_column(String(64), primary_key=True, default="default")
     state: Mapped[str | None] = mapped_column(String(256))
     data: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+class LinkIntent(Base):
+    """A one-time startgroup token, bound to the Admin who pressed Add to chat.
+
+    Single use: consumed by the first successful Linking; it expires after an
+    hour (§10).
+    """
+
+    __tablename__ = "link_intent"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class Chat(Base):
+    """A Linked Chat (§12), created on Linking with the defaults."""
+
+    __tablename__ = "chat"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    title: Mapped[str | None]
+    # active | suspended | removed; every chat starts active.
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    # observation | auto; every chat starts in Observation Mode (§12).
+    mode: Mapped[str] = mapped_column(String(16), default="observation")
+    # laya | jev; `laya` while it is the deployed default (§12).
+    backend: Mapped[str] = mapped_column(String(16), default="laya")
+    # lenient | balanced | strict.
+    sensitivity: Mapped[str] = mapped_column(String(16), default="balanced")
+    # The language of Chat Notices and buttons, set from the Linker's language.
+    chat_language: Mapped[str] = mapped_column(String(8), default="en")
+    # Steps in seconds, 0 = forever; the §12 default ladder.
+    ladder: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), default=lambda: list(DEFAULT_LADDER))
+    # Seconds until a Violation stops being Active; None = never.
+    expiry_seconds: Mapped[int | None] = mapped_column(BigInteger, default=DEFAULT_EXPIRY_SECONDS)
+    # The Admin who linked the chat.
+    linker_id: Mapped[int] = mapped_column(BigInteger)
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    observation_summary_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Category(Base):
+    """A kind of unwanted content; the builtin ones are seeded by migration."""
+
+    __tablename__ = "category"
+
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    builtin: Mapped[bool]
+
+
+class ChatCategory(Base):
+    """One Category switched on or off per chat (§12)."""
+
+    __tablename__ = "chat_category"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"), primary_key=True
+    )
+    category_code: Mapped[str] = mapped_column(
+        String(32), ForeignKey("category.code"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # None = use the chat's Sensitivity preset (§12).
+    violation_threshold: Mapped[float | None] = mapped_column(Float)
+    suspicion_threshold: Mapped[float | None] = mapped_column(Float)
+
+
+class AdminSubscription(Base):
+    """Which Admin Alerts an Admin receives for one chat (§9)."""
+
+    __tablename__ = "admin_subscription"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # all | appeals | off; the Linker gets `all` on Linking.
+    alert_mode: Mapped[str] = mapped_column(String(16), default="off")

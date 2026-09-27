@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from app.db.migrate import run_migrations
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 
 
@@ -26,3 +26,11 @@ async def engine(postgres_url: str) -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(postgres_url)
     yield engine
     await engine.dispose()
+
+
+@pytest.fixture
+async def db_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    """One transaction-shaped session over the shared migrated schema."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as session:
+        yield session
