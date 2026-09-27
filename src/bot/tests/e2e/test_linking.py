@@ -5,6 +5,7 @@ the recorded Bot API calls and the DB state (§17).
 """
 
 from collections.abc import AsyncIterator, Iterator
+from datetime import timedelta
 from itertools import count
 
 import pytest
@@ -42,6 +43,11 @@ def admin_id() -> Iterator[int]:
 
 @pytest.fixture
 def chat_id() -> Iterator[int]:
+    yield next(_chat_ids)
+
+
+@pytest.fixture
+def second_chat_id() -> Iterator[int]:
     yield next(_chat_ids)
 
 
@@ -278,3 +284,75 @@ async def test_check_again_succeeds_once_the_rights_are_fixed(
             .all()
         )
     assert left == []  # the intent was consumed by this completion
+
+
+async def test_an_expired_token_links_nothing(app: TestApp, admin_id: int, chat_id: int) -> None:
+    """The intent is valid for one hour; a promotion after that is not a Linking."""
+    await linked_menu(app, admin_id)
+    app.clock.advance(timedelta(hours=1, seconds=1))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+
+    await app.feed(
+        my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title="My Chat")
+    )
+
+    # Without a valid intent the promotion is not a Linking attempt at all:
+    # no checks, no live calls, no Menu change.
+    assert app.session.call_names() == []
+    assert await stored_chat(app.session_maker, chat_id) is None
+
+
+async def test_a_used_token_is_not_asked_for_twice(
+    app: TestApp, admin_id: int, chat_id: int, second_chat_id: int
+) -> None:
+    """The first success consumes the intent; a second promotion finds nothing."""
+    await linked_menu(app, admin_id)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title="My Chat")
+    )
+    assert await stored_chat(app.session_maker, chat_id) is not None
+    app.session.calls.clear()
+
+    # The same Admin adds the bot to another group without pressing Add to chat again.
+    await app.feed(
+        my_chat_member_update(second_chat_id, "supergroup", linker_id=admin_id, title="Other")
+    )
+
+    assert app.session.calls == []  # the used token is not asked for twice
+    assert await stored_chat(app.session_maker, second_chat_id) is None
+    assert await stored_subscription(app.session_maker, second_chat_id, admin_id) is None
+
+
+async def test_check_again_after_the_intent_expired_offers_a_new_link(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    menu_message_id = await linked_menu(app, admin_id)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        my_chat_member_update(
+            chat_id,
+            "supergroup",
+            linker_id=admin_id,
+            title="My Chat",
+            can_restrict_members=False,
+        )
+    )
+    app.clock.advance(timedelta(hours=2))  # the failure sat on the screen too long
+    app.session.calls.clear()
+
+    # Everything is fine now, but the one-hour intent is gone.
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        private_callback_update(
+            admin_id, f"link-check:{chat_id}", menu_message_id, language_code="en"
+        )
+    )
+
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert "expired" in (edit.text or "")
+    (back,) = edit.reply_markup.inline_keyboard[0]
+    assert back.callback_data == "menu:home:"
+    assert await stored_chat(app.session_maker, chat_id) is None

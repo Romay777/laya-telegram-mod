@@ -18,6 +18,19 @@ class LinkIntentRepository:
         await self.session.flush()
         return intent
 
+    async def find_valid(self, user_id: int, *, now: datetime) -> LinkIntent | None:
+        """The newest unexpired intent of `user_id`, left in place.
+
+        The gate for "is this promotion a Linking attempt?"; the intent is
+        only taken out by `consume_valid` when the link completes.
+        """
+        return await self.session.scalar(
+            select(LinkIntent)
+            .where(LinkIntent.user_id == user_id, LinkIntent.expires_at > now)
+            .order_by(LinkIntent.expires_at.desc(), LinkIntent.token)
+            .limit(1)
+        )
+
     async def consume_valid(self, user_id: int, *, now: datetime) -> LinkIntent | None:
         """Take the newest unexpired intent of `user_id` out of the table.
 

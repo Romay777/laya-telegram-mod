@@ -100,11 +100,15 @@ class LinkingService:
     ) -> None:
         """A `my_chat_member` update made the bot an administrator (§10 step 2+).
 
-        The three checks run in order; on success the intent is consumed and
-        the chat linked, on failure the Admin's Menu lists what is missing. An
-        expired or reused token means this promotion is not a Linking attempt.
+        An expired or reused token means this promotion is not a Linking
+        attempt and is ignored outright. Otherwise the three checks run in
+        order; on success the intent is consumed and the chat linked, on
+        failure the Admin's Menu lists what is missing.
         """
         linker_id = event.from_user.id
+        if await LinkIntentRepository(session).find_valid(linker_id, now=self._clock.now()) is None:
+            return  # expired or reused token
+
         chat_type = event.chat.type
         # Check 3 needs a live `getChatMember`; an earlier failing check means
         # it does not run (§10 step 3: the checks run in order).
@@ -152,9 +156,8 @@ class LinkingService:
             await self._defer_to_group_prompt(bot, facts, telegram_language_code)
             return
 
-        intent = await LinkIntentRepository(session).consume_valid(linker_id, now=self._clock.now())
-        if intent is None:
-            return  # expired or reused token
+        # Single use: taken out only now, when the link really completes.
+        await LinkIntentRepository(session).consume_valid(linker_id, now=self._clock.now())
 
         chat = await self._complete_link(
             session, facts, chat_language=linker.language or FALLBACK_LANGUAGE
