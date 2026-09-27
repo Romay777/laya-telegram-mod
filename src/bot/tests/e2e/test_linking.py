@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Iterator
 from itertools import count
 
 import pytest
-from aiogram.methods import GetChatMember
+from aiogram.methods import GetChat, GetChatMember
 from app.db.models import AdminSubscription, Chat, LinkIntent
 from app.domain.linking import DEFAULT_EXPIRY_SECONDS, DEFAULT_LADDER
 from app.linking.deep_link import INTENT_TTL
@@ -16,7 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.support.harness import FIXED_NOW, TestApp, app_fixture
-from tests.support.telegram import member_member, member_owner
+from tests.support.telegram import (
+    BOT_USER,
+    chat_facts,
+    member_administrator,
+    member_member,
+    member_owner,
+)
 from tests.support.updates import (
     my_chat_member_update,
     private_callback_update,
@@ -225,3 +231,50 @@ async def test_a_linker_who_is_not_an_admin_is_told_so(
     (check_against,), _ = edit.reply_markup.inline_keyboard
     assert check_against.callback_data == f"link-check:{chat_id}"
     assert await stored_chat(app.session_maker, chat_id) is None
+
+
+async def test_check_again_succeeds_once_the_rights_are_fixed(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """The failure was missing rights; the bot was demoted and promoted again."""
+    menu_message_id = await linked_menu(app, admin_id)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        my_chat_member_update(
+            chat_id,
+            "supergroup",
+            linker_id=admin_id,
+            title="My Chat",
+            can_restrict_members=False,  # the missing right
+        )
+    )
+    app.session.calls.clear()
+
+    # 🔵 Check again: the bot's rights were fixed in the meantime.
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))  # the bot, both rights
+    app.session.script(GetChatMember, member_owner(user(admin_id)))  # the Linker
+    await app.feed(
+        private_callback_update(
+            admin_id, f"link-check:{chat_id}", menu_message_id, language_code="en"
+        )
+    )
+
+    assert app.session.calls_of("SendMessage") == []  # still the one self-editing Menu
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert (edit.chat_id, edit.message_id) == (admin_id, menu_message_id)
+    assert (edit.text or "").startswith("✅ My Chat linked")
+
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None
+    assert chat.linker_id == admin_id
+    subscription = await stored_subscription(app.session_maker, chat_id, admin_id)
+    assert subscription is not None and subscription.alert_mode == "all"
+
+    async with app.session_maker() as db:
+        left = (
+            (await db.execute(select(LinkIntent).where(LinkIntent.user_id == admin_id)))
+            .scalars()
+            .all()
+        )
+    assert left == []  # the intent was consumed by this completion

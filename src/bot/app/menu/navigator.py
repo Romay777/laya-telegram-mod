@@ -22,6 +22,7 @@ from app.menu.screens import (
     home_screen,
     how_it_works_screen,
     language_screen,
+    link_expired_screen,
     link_failed_screen,
     linked_chat_screen,
 )
@@ -124,6 +125,16 @@ class MenuNavigator:
                 chat_id=chat_id,
                 problems=problems,
             ),
+        )
+
+    async def show_link_expired(
+        self, *, bot: Bot, session: AsyncSession, user: BotUser, locale: str
+    ) -> None:
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=link_expired_screen(translator_for(self.core, locale)),
         )
 
     async def _show(

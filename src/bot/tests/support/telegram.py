@@ -5,6 +5,7 @@ person who added it; the e2e harness scripts those answers per test.
 """
 
 from aiogram.types import (
+    AcceptedGiftTypes,
     ChatFullInfo,
     ChatMemberAdministrator,
     ChatMemberMember,
@@ -56,7 +57,13 @@ def chat_facts(chat_id: int, chat_type: str, title: str | None = None) -> ChatFu
         title=title,
         accent_color_id=0,
         max_reaction_count=0,
-        accepted_gift_types=[],
+        accepted_gift_types=AcceptedGiftTypes(
+            unlimited_gifts=False,
+            limited_gifts=False,
+            unique_gifts=False,
+            premium_subscription=False,
+            gifts_from_channels=False,
+        ),
     )
 
 

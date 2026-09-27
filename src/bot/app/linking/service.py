@@ -179,6 +179,73 @@ class LinkingService:
             return None
         return member.status
 
+    async def check_against(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        navigator: MenuNavigator,
+        user: BotUser,
+        chat_id: int,
+        locale: str,
+    ) -> None:
+        """🔵 Check again from the failure screen: the same checks, live (§10 step 5)."""
+        facts = await self._facts_live(bot, chat_id, user.user_id)
+        problems = linking_problems(
+            chat_type=facts.chat_type,
+            can_delete_messages=facts.can_delete_messages,
+            can_restrict_members=facts.can_restrict_members,
+            linker_status=facts.linker_status,
+        )
+        if problems:
+            await navigator.show_link_failed(
+                bot=bot,
+                session=session,
+                user=user,
+                chat_title=facts.chat_title,
+                chat_id=chat_id,
+                problems=problems,
+                locale=locale,
+            )
+            return
+
+        intent = await LinkIntentRepository(session).consume_valid(
+            user.user_id, now=self._clock.now()
+        )
+        if intent is None:
+            # The intent expired while the failure sat on the screen.
+            await navigator.show_link_expired(bot=bot, session=session, user=user, locale=locale)
+            return
+
+        chat = await self._complete_link(
+            session, facts, chat_language=user.language or FALLBACK_LANGUAGE
+        )
+        await self._show_linked(
+            bot,
+            session,
+            navigator,
+            user,
+            facts,
+            chat.mode,
+            chat.backend,
+            chat.sensitivity,
+            locale,
+        )
+
+    async def _facts_live(self, bot: Bot, chat_id: int, linker_id: int) -> PromotionFacts:
+        """The same facts as a promotion, read live instead of from the update."""
+        chat = await bot.get_chat(chat_id)
+        bot_member = await bot.get_chat_member(chat_id, bot.id)
+        return PromotionFacts(
+            chat_id=chat_id,
+            chat_title=chat.title,
+            chat_type=chat.type,
+            can_delete_messages=bool(getattr(bot_member, "can_delete_messages", False)),
+            can_restrict_members=bool(getattr(bot_member, "can_restrict_members", False)),
+            linker_id=linker_id,
+            linker_status=await self._member_status(bot, chat_id, linker_id),
+        )
+
     def _locale(self, linker: BotUser | None, telegram_language_code: str | None) -> str:
         """The Linker's interface language (§15), before any choice the client one."""
         if linker is not None and linker.language:
