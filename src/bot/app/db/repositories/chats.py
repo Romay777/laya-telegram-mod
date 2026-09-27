@@ -46,9 +46,7 @@ class ChatRepository:
         self.session.add(chat)
         await self.session.flush()
 
-        enabled = (
-            select(Category.code).where(Category.code.in_(BUILTIN_CATEGORIES))
-        )
+        enabled = select(Category.code).where(Category.code.in_(BUILTIN_CATEGORIES))
         for (code,) in (await self.session.execute(enabled)).all():
             self.session.add(ChatCategory(chat_id=chat_id, category_code=code, enabled=True))
         await self.session.flush()

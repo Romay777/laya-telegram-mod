@@ -9,7 +9,8 @@ from aiogram_i18n import I18nContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser
-from app.i18n import SUPPORTED_LANGUAGES, translator_for
+from app.i18n import SUPPORTED_LANGUAGES
+from app.linking.service import LinkingService
 from app.menu.callbacks import MenuAction, MenuCallback
 from app.menu.navigator import MenuNavigator
 
@@ -47,12 +48,16 @@ def create_private_router() -> Router:
         session: AsyncSession,
         bot_user: BotUser,
         navigator: MenuNavigator,
+        linking: LinkingService,
         i18n: I18nContext,
     ) -> None:
-        t = translator_for(navigator.core, i18n.locale)
         if callback_data.action is MenuAction.ADD_TO_CHAT:
-            # Placeholder until the Linking flow lands (§10).
-            await callback.answer(text=t("menu-add-to-chat-placeholder"))
+            # The primary Linking path starts here (§10 step 1).
+            url = await linking.start_link(bot=bot, session=session, user=bot_user)
+            await navigator.show_add_chat(
+                bot=bot, session=session, user=bot_user, url=url, locale=i18n.locale
+            )
+            await callback.answer()
             return
 
         locale = i18n.locale

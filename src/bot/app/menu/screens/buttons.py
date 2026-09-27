@@ -22,3 +22,13 @@ def button(
         callback_data=MenuCallback(action=action, code=code).pack(),
         style=style,
     )
+
+
+def url_button(
+    t: GetText,
+    key: str,
+    url: str,
+    style: str | None = None,
+) -> InlineKeyboardButton:
+    """A button that opens a URL instead of pressing a callback (the deep link)."""
+    return InlineKeyboardButton(text=t(key), url=url, style=style)

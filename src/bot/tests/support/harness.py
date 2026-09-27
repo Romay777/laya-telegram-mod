@@ -29,6 +29,8 @@ FIXED_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 @dataclass
 class TestApp:
+    __test__ = False  # a harness, not a test class: keep pytest from collecting it
+
     dispatcher: Dispatcher
     bot: Bot
     session: FakeBotSession
@@ -50,14 +52,21 @@ class TestApp:
         await self.engine.dispose()
 
 
-async def build_app(postgres_url: str) -> TestApp:
+async def build_app(postgres_url: str, *, prompt_delete_after_s: float = 600.0) -> TestApp:
     i18n = build_i18n_middleware()
     await i18n.core.startup()  # the Dispatcher's startup hook does this in production
 
     engine = create_async_engine(postgres_url)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     clock = FakeClock(FIXED_NOW)
-    dispatcher = build_dispatcher(session_maker=session_maker, i18n=i18n, clock=clock)
+    dispatcher = build_dispatcher(
+        session_maker=session_maker,
+        i18n=i18n,
+        clock=clock,
+        # The default is 600 s (§10); tests shrink it so the self-deleting
+        # group prompt actually deletes inside the test.
+        prompt_delete_after_s=prompt_delete_after_s,
+    )
 
     session = FakeBotSession()
     bot = Bot(TEST_BOT_TOKEN, session=session)

@@ -12,7 +12,9 @@ from app.config import Settings
 from app.db.fsm_storage import PostgresStorage
 from app.db.migrate import run_migrations
 from app.i18n.middleware import build_i18n_middleware
+from app.linking.service import LinkingService
 from app.menu.navigator import MenuNavigator
+from app.telegram.handlers.linking import create_linking_router
 from app.telegram.handlers.private import create_private_router
 from app.telegram.middlewares import BotUserMiddleware, DbSessionMiddleware
 
@@ -31,15 +33,23 @@ def build_dispatcher(
     session_maker: async_sessionmaker[AsyncSession],
     i18n: I18nMiddleware,
     clock: Clock,
+    prompt_delete_after_s: float = 600.0,
 ) -> Dispatcher:
     navigator = MenuNavigator(core=i18n.core)
+    linking = LinkingService(
+        session_maker=session_maker,
+        clock=clock,
+        prompt_delete_after_s=prompt_delete_after_s,
+    )
     dispatcher = Dispatcher(storage=PostgresStorage(session_maker))
     dispatcher.update.outer_middleware(DbSessionMiddleware(session_maker))
     dispatcher.update.outer_middleware(BotUserMiddleware(clock=clock))
     i18n.setup(dispatcher)  # locale resolution runs after the DB middlewares
     dispatcher.include_router(create_private_router())
+    dispatcher.include_router(create_linking_router())
     dispatcher["navigator"] = navigator
     dispatcher["clock"] = clock
+    dispatcher["linking"] = linking
     return dispatcher
 
 
@@ -58,6 +68,7 @@ async def run() -> None:
         session_maker=build_session_maker(settings.database_url),
         i18n=i18n,
         clock=SystemClock(),
+        prompt_delete_after_s=settings.linking.prompt_delete_after_s,
     )
     bot = build_bot(settings.bot_token)
     logger.info("starting polling with allowed_updates=%s", ALLOWED_UPDATES)

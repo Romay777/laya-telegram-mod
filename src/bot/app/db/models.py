@@ -12,7 +12,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, String
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.domain.linking import DEFAULT_LADDER, DEFAULT_EXPIRY_SECONDS
+from app.domain.linking import DEFAULT_EXPIRY_SECONDS, DEFAULT_LADDER
 
 
 class Base(DeclarativeBase):
@@ -83,7 +83,9 @@ class Chat(Base):
     # The language of Chat Notices and buttons, set from the Linker's language.
     chat_language: Mapped[str] = mapped_column(String(8), default="en")
     # Steps in seconds, 0 = forever; the §12 default ladder.
-    ladder: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), default=lambda: list(DEFAULT_LADDER))
+    ladder: Mapped[list[int]] = mapped_column(
+        ARRAY(BigInteger), default=lambda: list(DEFAULT_LADDER)
+    )
     # Seconds until a Violation stops being Active; None = never.
     expiry_seconds: Mapped[int | None] = mapped_column(BigInteger, default=DEFAULT_EXPIRY_SECONDS)
     # The Admin who linked the chat.

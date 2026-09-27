@@ -9,9 +9,8 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
-
 from app.domain.linking import DEFAULT_EXPIRY_SECONDS, DEFAULT_LADDER
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "0002"
@@ -81,9 +80,7 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("violation_threshold", sa.Float(), nullable=True),
         sa.Column("suspicion_threshold", sa.Float(), nullable=True),
-        sa.ForeignKeyConstraint(
-            ["chat_id"], ["chat.chat_id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["chat_id"], ["chat.chat_id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["category_code"], ["category.code"]),
         sa.PrimaryKeyConstraint("chat_id", "category_code"),
     )
@@ -93,9 +90,7 @@ def upgrade() -> None:
         sa.Column("chat_id", sa.BigInteger(), nullable=False),
         sa.Column("user_id", sa.BigInteger(), nullable=False),
         sa.Column("alert_mode", sa.String(length=16), nullable=False, server_default="off"),
-        sa.ForeignKeyConstraint(
-            ["chat_id"], ["chat.chat_id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["chat_id"], ["chat.chat_id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("chat_id", "user_id"),
     )
 

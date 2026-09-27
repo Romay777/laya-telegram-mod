@@ -10,4 +10,5 @@ menu-back = Back
 
 menu-how-it-works-text = Laya checks every message in your Linked Chats with an AI classifier and restricts Members who break the rules. Every chat starts in Observation Mode: nothing is deleted and nobody is restricted until you switch on auto-moderation.
 
-menu-add-to-chat-placeholder = Linking chats is not available yet.
+menu-add-chat-text = Open the group picker and add me to a group as an administrator. Telegram pre-fills the two rights I need; once that is done, I will check everything and report back here.
+menu-add-chat-open-picker = 🔵 Open the group picker

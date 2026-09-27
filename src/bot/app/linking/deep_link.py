@@ -15,7 +15,4 @@ ADMIN_RIGHTS_PARAM = "delete_messages+restrict_members"
 def startgroup_url(bot_username: str, token: str) -> str:
     """The `t.me` link that opens Telegram's group picker for `bot_username`."""
 
-    return (
-        f"https://t.me/{bot_username}"
-        f"?startgroup={token}&admin={ADMIN_RIGHTS_PARAM}"
-    )
+    return f"https://t.me/{bot_username}?startgroup={token}&admin={ADMIN_RIGHTS_PARAM}"

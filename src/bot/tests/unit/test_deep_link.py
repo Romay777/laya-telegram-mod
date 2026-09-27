@@ -15,4 +15,4 @@ def test_url_opens_the_group_picker_with_the_admin_rights_prefilled() -> None:
 
 
 def test_the_intent_is_valid_for_one_hour() -> None:
-    assert INTENT_TTL == timedelta(hours=1)
+    assert timedelta(hours=1) == INTENT_TTL

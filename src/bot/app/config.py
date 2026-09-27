@@ -90,6 +90,13 @@ class AdminCacheSettings:
 
 
 @dataclass(frozen=True)
+class LinkingSettings:
+    """How long the self-deleting group prompt of a not-yet-started Linker stays (§10)."""
+
+    prompt_delete_after_s: float = 600
+
+
+@dataclass(frozen=True)
 class JevSettings:
     api_key: str | None = None
     base_url: str = "https://api.typesafe.ai/v1"
@@ -111,6 +118,7 @@ class Settings:
     observation: ObservationSettings = field(default_factory=ObservationSettings)
     retention: RetentionSettings = field(default_factory=RetentionSettings)
     admin_cache: AdminCacheSettings = field(default_factory=AdminCacheSettings)
+    linking: LinkingSettings = field(default_factory=LinkingSettings)
 
     @classmethod
     def load(
@@ -167,4 +175,5 @@ class Settings:
             observation=ObservationSettings(**config.get("observation", {})),
             retention=RetentionSettings(**config.get("retention", {})),
             admin_cache=AdminCacheSettings(**config.get("admin_cache", {})),
+            linking=LinkingSettings(**config.get("linking", {})),
         )

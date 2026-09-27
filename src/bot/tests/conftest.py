@@ -4,7 +4,12 @@ from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from app.db.migrate import run_migrations
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from testcontainers.community.postgres import PostgresContainer
 
 

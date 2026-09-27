@@ -60,3 +60,6 @@ removed_chat_days = 30
 
 [admin_cache]
 ttl_s = 300
+
+[linking]
+prompt_delete_after_s = 600
