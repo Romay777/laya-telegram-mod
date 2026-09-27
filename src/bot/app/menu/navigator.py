@@ -14,6 +14,7 @@ from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser
+from app.domain.linking import LinkingProblems
 from app.i18n import translator_for
 from app.menu.screen import Screen
 from app.menu.screens import (
@@ -21,6 +22,7 @@ from app.menu.screens import (
     home_screen,
     how_it_works_screen,
     language_screen,
+    link_failed_screen,
     linked_chat_screen,
 )
 
@@ -98,6 +100,29 @@ class MenuNavigator:
                 mode=mode,
                 backend=backend,
                 sensitivity=sensitivity,
+            ),
+        )
+
+    async def show_link_failed(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_title: str | None,
+        chat_id: int,
+        problems: LinkingProblems,
+        locale: str,
+    ) -> None:
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=link_failed_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                problems=problems,
             ),
         )
 

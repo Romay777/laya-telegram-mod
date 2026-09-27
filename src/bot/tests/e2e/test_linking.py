@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.support.harness import FIXED_NOW, TestApp, app_fixture
-from tests.support.telegram import member_owner
+from tests.support.telegram import member_member, member_owner
 from tests.support.updates import (
     my_chat_member_update,
     private_callback_update,
@@ -157,3 +157,71 @@ async def test_promotion_links_the_chat_and_edits_the_linkers_menu(
             .all()
         )
     assert left == []  # the token was single use
+
+
+async def test_a_basic_group_gets_its_own_upgrade_explanation(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    menu_message_id = await linked_menu(app, admin_id)
+
+    await app.feed(my_chat_member_update(chat_id, "group", linker_id=admin_id, title="Old Chat"))
+
+    assert app.session.call_names() == [
+        "EditMessageText"
+    ]  # nothing live to check: not a supergroup
+    edit = app.session.calls_of("EditMessageText")[0].method
+    assert (edit.chat_id, edit.message_id) == (admin_id, menu_message_id)
+    text = edit.text or ""
+    assert "Old Chat" in text
+    assert "basic group" in text
+    assert "supergroup" in text  # the explanation says how the chat is upgraded
+    (check_against,), (back,) = edit.reply_markup.inline_keyboard
+    assert check_against.text == "🔵 Check again"
+    assert check_against.callback_data == f"link-check:{chat_id}"
+    assert back.callback_data == "menu:home:"
+
+    assert await stored_chat(app.session_maker, chat_id) is None
+    assert await the_intent(app.session_maker, admin_id) is not None  # not consumed
+
+
+async def test_missing_rights_are_listed_exactly(app: TestApp, admin_id: int, chat_id: int) -> None:
+    menu_message_id = await linked_menu(app, admin_id)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+
+    await app.feed(
+        my_chat_member_update(
+            chat_id,
+            "supergroup",
+            linker_id=admin_id,
+            title="My Chat",
+            can_delete_messages=True,
+            can_restrict_members=False,
+        )
+    )
+
+    edit = app.session.calls_of("EditMessageText")[0].method
+    assert (edit.chat_id, edit.message_id) == (admin_id, menu_message_id)
+    text = edit.text or ""
+    assert "My Chat" in text
+    assert "restrict members" in text
+    assert "delete messages" not in text  # exactly what is missing
+    assert await stored_chat(app.session_maker, chat_id) is None
+
+
+async def test_a_linker_who_is_not_an_admin_is_told_so(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    menu_message_id = await linked_menu(app, admin_id)
+    # getChatMember says the person who added the bot is a plain member.
+    app.session.script(GetChatMember, member_member(user(admin_id)))
+
+    await app.feed(
+        my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title="My Chat")
+    )
+
+    edit = app.session.calls_of("EditMessageText")[0].method
+    assert (edit.chat_id, edit.message_id) == (admin_id, menu_message_id)
+    assert "not an admin" in (edit.text or "")
+    (check_against,), _ = edit.reply_markup.inline_keyboard
+    assert check_against.callback_data == f"link-check:{chat_id}"
+    assert await stored_chat(app.session_maker, chat_id) is None

@@ -21,3 +21,12 @@ class MenuAction(StrEnum):
 class MenuCallback(CallbackData, prefix="menu"):
     action: MenuAction
     code: str | None = None
+
+
+class LinkCheckCallback(CallbackData, prefix="link-check"):
+    """🔵 Check again on the Linking failure screen (§10 step 5).
+
+    Carries the `chat_id` so the re-check knows which chat's rights to read.
+    """
+
+    chat_id: int

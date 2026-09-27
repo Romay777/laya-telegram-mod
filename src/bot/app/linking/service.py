@@ -105,16 +105,24 @@ class LinkingService:
         expired or reused token means this promotion is not a Linking attempt.
         """
         linker_id = event.from_user.id
+        chat_type = event.chat.type
+        # Check 3 needs a live `getChatMember`; an earlier failing check means
+        # it does not run (§10 step 3: the checks run in order).
+        linker_status = (
+            await self._member_status(bot, event.chat.id, linker_id)
+            if chat_type == "supergroup"
+            else None
+        )
         facts = PromotionFacts(
             chat_id=event.chat.id,
             chat_title=event.chat.title,
-            chat_type=event.chat.type,
+            chat_type=chat_type,
             can_delete_messages=bool(getattr(event.new_chat_member, "can_delete_messages", False)),
             can_restrict_members=bool(
                 getattr(event.new_chat_member, "can_restrict_members", False)
             ),
             linker_id=linker_id,
-            linker_status=await self._member_status(bot, event.chat.id, linker_id),
+            linker_status=linker_status,
         )
         problems = linking_problems(
             chat_type=facts.chat_type,
