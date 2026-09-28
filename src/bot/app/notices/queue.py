@@ -109,9 +109,7 @@ class NoticeQueue:
                 await notice.on_dropped()
                 continue
 
-            slot = next_send_at(
-                now, sent, per_second=self._per_second, per_minute=self._per_minute
-            )
+            slot = next_send_at(now, sent, per_second=self._per_second, per_minute=self._per_minute)
             if slot > now:
                 await self._sleep((slot - now).total_seconds())
                 continue

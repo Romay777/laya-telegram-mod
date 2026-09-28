@@ -142,6 +142,13 @@ class ModerationRepository:
         await self.session.flush()
         return True
 
+    async def mark_notice_dropped(self, violation_id: int) -> None:
+        """The notice aged out of the queue unposted: no Appeal is possible (§7)."""
+        violation = await self.session.get(Violation, violation_id)
+        if violation is not None:
+            violation.notice_dropped = True
+            await self.session.flush()
+
     async def save_notice(
         self, violation_id: int, *, message_id: int, delete_at: datetime
     ) -> ChatNotice:

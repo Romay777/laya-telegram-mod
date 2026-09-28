@@ -2,9 +2,11 @@
 
 One entry point per incoming group message. Each step can stop the
 pipeline; the actions on a Violation run in the §6 order — delete, record,
-restrict, notice — and the recording rules of §4 step 9 hold throughout:
-every check writes a `message_check` row without text, and only flagged
-messages keep theirs, in `flagged_message` until the retention passes.
+restrict, enqueue the notice — and the recording rules of §4 step 9 hold
+throughout: every check writes a `message_check` row without text, and
+only flagged messages keep theirs, in `flagged_message` until the
+retention passes. The Chat Notice itself goes through the per-chat
+rate-limited queue (§7); deleting and restricting are never delayed by it.
 """
 
 import time
@@ -15,7 +17,7 @@ from typing import Any
 from aiogram import Bot
 from aiogram.types import Message
 from aiogram_i18n.cores.base import BaseCore
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.alerts.fanout import AlertFanout
 from app.classifiers.client import Probabilities
@@ -29,7 +31,8 @@ from app.domain.decision import decide
 from app.linking.admin_cache import AdminCache
 from app.moderation import signals
 from app.moderation.actions import delete_message, restrict_member
-from app.notices.sender import removal_time, send_notice
+from app.notices.jobs import violation_notice
+from app.notices.queue import NoticeQueue
 
 #: The backend this pipeline checks with: the local Laya (§5). Jev, the
 #: fallback router and its incidents are ticket #14.
@@ -52,6 +55,8 @@ class ModerationPipeline:
         flagged_text_days: int,
         max_notice_lifetime_h: int,
         fanout: AlertFanout,
+        notices: NoticeQueue,
+        session_maker: async_sessionmaker[AsyncSession],
     ) -> None:
         self._clock = clock
         self._core = core
@@ -61,6 +66,8 @@ class ModerationPipeline:
         self._flagged_text_days = flagged_text_days
         self._max_notice_lifetime_h = max_notice_lifetime_h
         self._fanout = fanout
+        self._notices = notices
+        self._session_maker = session_maker
 
     async def handle_message(
         self,
@@ -178,31 +185,36 @@ class ModerationPipeline:
         await restrict_member(
             bot, chat.chat_id, sender.id, restricted_until=violation.restricted_until
         )
-        # §7: the 🙋 button is on the notice only while an Appeal would reach
-        # an Admin — a channel sender gets no button either way (§4).
+        # The Violation becomes durable before anything background refers to
+        # it: the queue's drain posts the notice from its own session, which
+        # cannot see this request's uncommitted transaction.
+        await session.commit()
+        # §6 steps 4-5: the Chat Notice goes into the per-chat rate-limited
+        # queue (§7) — deleting and restricting above already happened, and
+        # the Admin Alerts below do not wait for it. The 🙋 button is on the
+        # notice only while an Appeal would reach an Admin (§7); a channel
+        # sender gets no button either way (§4).
         appeal_recipient = await self._fanout.has_appeal_recipient(
             bot, session, admin_cache=admin_cache, chat=chat
         )
-        notice = await send_notice(
-            bot,
-            self._core,
-            chat_id=chat.chat_id,
-            chat_language=chat.chat_language,
-            name=sender.first_name or str(sender.id),
-            category=decision.category,
-            step_seconds=violation.restriction_seconds or 0,
-            appeal_violation_id=violation.id if appeal_recipient else None,
-        )
-        await repo.save_notice(
-            violation.id,
-            message_id=notice.message_id,
-            delete_at=removal_time(
-                now,
-                restricted_until=violation.restricted_until,
+        self._notices.enqueue(
+            violation_notice(
+                session_maker=self._session_maker,
+                bot=bot,
+                core=self._core,
+                clock=self._clock,
+                fanout=self._fanout,
+                chat=chat,
+                violation=violation,
+                member_name=sender.first_name or str(sender.id),
+                category=decision.category,
+                confidence=decision.confidence,
+                flagged_text=text,
+                flagged_entities=entities,
                 max_lifetime_h=self._max_notice_lifetime_h,
-            ),
+                appeal_violation_id=violation.id if appeal_recipient else None,
+            )
         )
-        # §6, step 5: the Admin Alert fan-out, after the Chat Notice.
         await self._fanout.violation_alert(
             bot,
             session,

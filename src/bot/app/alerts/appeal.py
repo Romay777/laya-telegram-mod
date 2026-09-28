@@ -66,6 +66,10 @@ async def file_appeal(
         return FiledAppeal(toast="notice-appeal-already-sent")
     if violation.revoked_at is not None:
         return FiledAppeal(toast="notice-appeal-too-late")
+    if violation.notice_dropped:
+        # §7: the notice never made it out of the queue, so no Appeal
+        # is possible for this Violation.
+        return FiledAppeal(toast="notice-appeal-dropped")
     appeal = await repo.create(violation.id, created_at=clock.now())
     if appeal is None:  # a concurrent filing won the UNIQUE constraint (§8)
         return FiledAppeal(toast="notice-appeal-already-sent")

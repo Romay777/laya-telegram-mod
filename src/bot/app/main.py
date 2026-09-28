@@ -21,6 +21,7 @@ from app.linking.admin_cache import AdminCache
 from app.linking.service import LinkingService
 from app.menu.navigator import MenuNavigator
 from app.moderation.pipeline import ModerationPipeline, Thresholds
+from app.notices.queue import NoticeQueue
 from app.scheduler import Scheduler
 from app.telegram.handlers.alerts import create_alerts_router
 from app.telegram.handlers.appeals import create_appeals_router
@@ -71,6 +72,10 @@ def build_dispatcher(
     outcome_visible_s: int = 600,
     alerts_pace_s: float = 1.0,
     summary_after_h: int = 48,
+    notices: NoticeQueue | None = None,
+    notices_per_second: float = 1,
+    notices_per_minute: int = 18,
+    max_queue_age_s: int = 300,
 ) -> Dispatcher:
     navigator = MenuNavigator(core=i18n.core)
     linking = LinkingService(
@@ -81,6 +86,16 @@ def build_dispatcher(
     )
     admin_cache = AdminCache(clock=clock, ttl_s=admin_cache_ttl_s)
     fanout = AlertFanout(core=i18n.core, clock=clock, pace_s=alerts_pace_s)
+    notice_queue = (
+        notices
+        if notices is not None
+        else NoticeQueue(
+            clock=clock,
+            per_second=notices_per_second,
+            per_minute=notices_per_minute,
+            max_queue_age_s=max_queue_age_s,
+        )
+    )
     pipeline = ModerationPipeline(
         clock=clock,
         core=i18n.core,
@@ -90,6 +105,8 @@ def build_dispatcher(
         flagged_text_days=flagged_text_days,
         max_notice_lifetime_h=max_notice_lifetime_h,
         fanout=fanout,
+        notices=notice_queue,
+        session_maker=session_maker,
     )
     dispatcher = Dispatcher(storage=PostgresStorage(session_maker))
     dispatcher.update.outer_middleware(DbSessionMiddleware(session_maker))
@@ -105,6 +122,8 @@ def build_dispatcher(
     dispatcher["linking"] = linking
     dispatcher["admin_cache"] = admin_cache
     dispatcher["fanout"] = fanout
+    dispatcher["notices"] = notice_queue
+    dispatcher["session_maker"] = session_maker
     dispatcher["pipeline"] = pipeline
     return dispatcher
 
@@ -140,6 +159,9 @@ async def run() -> None:
         outcome_visible_s=settings.notices.outcome_visible_s,
         alerts_pace_s=settings.alerts.pace_s,
         summary_after_h=settings.observation.summary_after_h,
+        notices_per_second=settings.notices.per_second,
+        notices_per_minute=settings.notices.per_minute,
+        max_queue_age_s=settings.notices.max_queue_age_s,
     )
     bot = build_bot(settings.bot_token)
     # §11: one loop picks up every due job; Telegram lifts expired

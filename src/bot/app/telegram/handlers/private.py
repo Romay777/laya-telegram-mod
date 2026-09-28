@@ -24,6 +24,7 @@ from app.menu.callbacks import (
     ChatModeCallback,
     ChatSettingsCallback,
     EnableAutoCallback,
+    JournalCallback,
     MenuAction,
     MenuCallback,
     MyAlertsCallback,
@@ -346,6 +347,34 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
                 show_alert=True,
             )
             return
+        await callback.answer()
+
+    @router.callback_query(JournalCallback.filter(), F.message.chat.type == "private")
+    async def open_journal(
+        callback: CallbackQuery,
+        callback_data: JournalCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """Open journal, from a burst summary (§9).
+
+        The Journal screen itself arrives with its ticket; until then the
+        button lands on the chat's own screen, where the Journal lives (§13).
+        """
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n)
         await callback.answer()
 
     @router.message(StateFilter(FallbackLinkStates.waiting_for_chat), F.chat.type == "private")

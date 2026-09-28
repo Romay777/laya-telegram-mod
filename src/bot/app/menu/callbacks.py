@@ -132,3 +132,11 @@ class SuspicionDecideCallback(CallbackData, prefix="suspicion-decide"):
     chat_id: int
     suspicion_id: int
     punish: bool
+
+
+class JournalCallback(CallbackData, prefix="journal"):
+    """Open journal, the button on a burst summary (§9) and, later, the Chat
+    screen (§13). Carries the `chat_id` so the handler can re-check Admin
+    access (§13)."""
+
+    chat_id: int

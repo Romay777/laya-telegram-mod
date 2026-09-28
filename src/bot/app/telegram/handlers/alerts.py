@@ -8,7 +8,7 @@ re-check still applies (§13).
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 from aiogram_i18n import I18nContext
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.alerts.fanout import AlertFanout
 from app.alerts.lift import lift_violation
@@ -18,6 +18,7 @@ from app.db.repositories.chats import ChatRepository
 from app.i18n import translator_for
 from app.linking.admin_cache import AdminCache
 from app.menu.callbacks import LiftRestrictionCallback, SuspicionDecideCallback
+from app.notices.queue import NoticeQueue
 from app.notices.sender import DEFAULT_MAX_LIFETIME_H
 
 
@@ -69,9 +70,11 @@ def create_alerts_router(max_notice_lifetime_h: int = DEFAULT_MAX_LIFETIME_H) ->
         callback_data: SuspicionDecideCallback,
         bot: Bot,
         session: AsyncSession,
+        session_maker: async_sessionmaker[AsyncSession],
         admin_cache: AdminCache,
         clock: Clock,
         fanout: AlertFanout,
+        notices: NoticeQueue,
         i18n: I18nContext,
     ) -> None:
         """🔴 Punish / Dismiss on a Suspicion alert copy; first click wins (§9)."""
@@ -100,6 +103,8 @@ def create_alerts_router(max_notice_lifetime_h: int = DEFAULT_MAX_LIFETIME_H) ->
             admin=callback.from_user,
             locale=i18n.locale,
             max_notice_lifetime_h=max_notice_lifetime_h,
+            notices=notices,
+            session_maker=session_maker,
         )
         if decision.won:
             await callback.answer()

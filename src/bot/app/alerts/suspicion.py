@@ -18,19 +18,20 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.types import User
 from aiogram_i18n.cores.base import BaseCore
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.alerts.fanout import AlertFanout
 from app.alerts.lift import decided_by, handle_of
 from app.clock import Clock
-from app.db.models import Chat, MessageCheck, Suspicion
+from app.db.models import Chat, FlaggedMessage, MessageCheck, Suspicion
 from app.db.repositories.alerts import AlertRepository
 from app.db.repositories.moderation import ModerationRepository
 from app.db.repositories.suspicions import SuspicionRepository
 from app.i18n import translator_for
 from app.linking.admin_cache import AdminCache
 from app.moderation.actions import restrict_member
-from app.notices.sender import removal_time, send_notice
+from app.notices.jobs import violation_notice
+from app.notices.queue import NoticeQueue
 
 #: Telegram stops allowing deletions after 48 hours (§4, §9).
 DELETION_WINDOW = timedelta(hours=48)
@@ -59,6 +60,8 @@ async def decide_suspicion(
     admin: User,
     locale: str,
     max_notice_lifetime_h: int,
+    notices: NoticeQueue,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> SuspicionDecision:
     """Apply one decision press on a Suspicion alert copy (§9)."""
     repo = SuspicionRepository(session)
@@ -82,6 +85,8 @@ async def decide_suspicion(
             chat=chat,
             suspicion=suspicion,
             max_notice_lifetime_h=max_notice_lifetime_h,
+            notices=notices,
+            session_maker=session_maker,
         )
 
     t = translator_for(core, locale)
@@ -121,6 +126,8 @@ async def _apply_punishment(
     chat: Chat,
     suspicion: Suspicion,
     max_notice_lifetime_h: int,
+    notices: NoticeQueue,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> bool:
     """The full Violation (§6, §9); returns whether the message was deleted."""
     now = clock.now()
@@ -134,6 +141,7 @@ async def _apply_punishment(
     # §6 steps 2-3: record the Violation, then restrict the Member. A Member
     # already restricted by another Violation still counts this one (§9).
     check = await session.get(MessageCheck, suspicion.check_id)
+    flagged = await session.get(FlaggedMessage, suspicion.check_id)
     violation = await ModerationRepository(session).record_violation(
         chat=chat,
         user_id=suspicion.user_id,
@@ -145,29 +153,33 @@ async def _apply_punishment(
     await restrict_member(
         bot, chat.chat_id, suspicion.user_id, restricted_until=violation.restricted_until
     )
-    # §6 step 4: the Chat Notice, with its 🙋 button only while an Appeal
-    # would reach an Admin (§7) — the same rule the pipeline applies.
+    # The Violation becomes durable before anything background refers to it:
+    # the queue's drain posts the notice from its own session, which cannot
+    # see this request's uncommitted transaction.
+    await session.commit()
+    # §6 step 4: the Chat Notice goes through the rate-limited queue (§7),
+    # with its 🙋 button only while an Appeal would reach an Admin — the
+    # same rule the pipeline applies.
     appeal_recipient = await fanout.has_appeal_recipient(
         bot, session, admin_cache=admin_cache, chat=chat
     )
-    notice = await send_notice(
-        bot,
-        core,
-        chat_id=chat.chat_id,
-        chat_language=chat.chat_language,
-        name=await _member_name(bot, chat.chat_id, suspicion.user_id),
-        category=violation.category,
-        step_seconds=violation.restriction_seconds or 0,
-        appeal_violation_id=violation.id if appeal_recipient else None,
-    )
-    await ModerationRepository(session).save_notice(
-        violation.id,
-        message_id=notice.message_id,
-        delete_at=removal_time(
-            now,
-            restricted_until=violation.restricted_until,
+    notices.enqueue(
+        violation_notice(
+            session_maker=session_maker,
+            bot=bot,
+            core=core,
+            clock=clock,
+            fanout=fanout,
+            chat=chat,
+            violation=violation,
+            member_name=await _member_name(bot, chat.chat_id, suspicion.user_id),
+            category=violation.category,
+            confidence=check.confidence if check is not None else 0.0,
+            flagged_text=flagged.text if flagged is not None else None,
+            flagged_entities=flagged.entities if flagged is not None else None,
             max_lifetime_h=max_notice_lifetime_h,
-        ),
+            appeal_violation_id=violation.id if appeal_recipient else None,
+        )
     )
     return not too_old
 
