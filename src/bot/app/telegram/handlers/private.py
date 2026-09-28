@@ -1,5 +1,6 @@
 """Private-chat handlers: /start and the Menu callbacks (§13)."""
 
+from datetime import timedelta
 from typing import cast
 
 from aiogram import Bot, F, Router
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.alerts import ALERT_MODES
 from app.alerts.fanout import APPEAL_MODES
+from app.clock import Clock
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
@@ -21,15 +23,20 @@ from app.menu.callbacks import (
     ChatCallback,
     ChatModeCallback,
     ChatSettingsCallback,
+    EnableAutoCallback,
     MenuAction,
     MenuCallback,
     MyAlertsCallback,
+    ObserveCallback,
 )
 from app.menu.navigator import MenuNavigator
 from app.menu.screens.home import ChatSummary
 
+#: The §13 default: the choice offered right after Linking waits 2 days.
+DEFAULT_SUMMARY_AFTER_H = 48
 
-def create_private_router() -> Router:
+
+def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Router:
     router = Router(name="private")
 
     @router.message(CommandStart(), F.chat.type == "private")
@@ -237,6 +244,60 @@ def create_private_router() -> Router:
         )
         await callback.answer()
 
+    @router.callback_query(EnableAutoCallback.filter(), F.message.chat.type == "private")
+    async def enable_auto(
+        callback: CallbackQuery,
+        callback_data: EnableAutoCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """🟢 Enable auto-moderation now — after Linking or from the summary (§13)."""
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        chat.mode = "auto"  # idempotent: the summary button may be pressed late
+        await session.flush()
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n)
+        await callback.answer()
+
+    @router.callback_query(ObserveCallback.filter(), F.message.chat.type == "private")
+    async def observe_first(
+        callback: CallbackQuery,
+        callback_data: ObserveCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        clock: Clock,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """🔵 Observe for 2 days first: schedule the one summary (§13, §11)."""
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        chat.mode = "observation"
+        chat.observation_summary_at = clock.now() + timedelta(hours=summary_after_h)
+        await session.flush()
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n)
+        await callback.answer()
+
     @router.callback_query(MyAlertsCallback.filter(), F.message.chat.type == "private")
     async def my_alerts(
         callback: CallbackQuery,
@@ -324,6 +385,28 @@ async def _accessible_chat(
     if chat is None or not await admin_cache.is_admin(bot, chat.chat_id, callback.from_user.id):
         return None
     return chat
+
+
+async def _show_chat_screen(
+    bot: Bot,
+    session: AsyncSession,
+    navigator: MenuNavigator,
+    bot_user: BotUser,
+    chat: Chat,
+    i18n: I18nContext,
+) -> None:
+    """The chat's own status screen, after a choice has been made (§13)."""
+    await navigator.show_chat(
+        bot=bot,
+        session=session,
+        user=bot_user,
+        chat_id=chat.chat_id,
+        chat_title=chat.title,
+        mode=chat.mode,
+        backend=chat.backend,
+        sensitivity=chat.sensitivity,
+        locale=i18n.locale,
+    )
 
 
 async def _access_lost(

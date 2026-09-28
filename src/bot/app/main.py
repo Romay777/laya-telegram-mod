@@ -70,6 +70,7 @@ def build_dispatcher(
     max_notice_lifetime_h: int = 24,
     outcome_visible_s: int = 600,
     alerts_pace_s: float = 1.0,
+    summary_after_h: int = 48,
 ) -> Dispatcher:
     navigator = MenuNavigator(core=i18n.core)
     linking = LinkingService(
@@ -94,7 +95,7 @@ def build_dispatcher(
     dispatcher.update.outer_middleware(DbSessionMiddleware(session_maker))
     dispatcher.update.outer_middleware(BotUserMiddleware(clock=clock))
     i18n.setup(dispatcher)  # locale resolution runs after the DB middlewares
-    dispatcher.include_router(create_private_router())
+    dispatcher.include_router(create_private_router(summary_after_h=summary_after_h))
     dispatcher.include_router(create_linking_router())
     dispatcher.include_router(create_alerts_router(max_notice_lifetime_h=max_notice_lifetime_h))
     dispatcher.include_router(create_appeals_router(outcome_visible_s=outcome_visible_s))
@@ -138,6 +139,7 @@ async def run() -> None:
         max_notice_lifetime_h=settings.notices.max_lifetime_h,
         outcome_visible_s=settings.notices.outcome_visible_s,
         alerts_pace_s=settings.alerts.pace_s,
+        summary_after_h=settings.observation.summary_after_h,
     )
     bot = build_bot(settings.bot_token)
     # §11: one loop picks up every due job; Telegram lifts expired

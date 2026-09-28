@@ -193,12 +193,14 @@ class MenuNavigator:
         bot: Bot,
         session: AsyncSession,
         user: BotUser,
+        chat_id: int,
         chat_title: str | None,
         mode: str,
         backend: str,
         sensitivity: str,
         locale: str,
     ) -> None:
+        """✅ {chat} linked, then the Auto-moderation choice (§13)."""
         await self._show(
             bot=bot,
             session=session,
@@ -206,6 +208,7 @@ class MenuNavigator:
             screen=linked_chat_screen(
                 translator_for(self.core, locale),
                 chat_title,
+                chat_id=chat_id,
                 mode=mode,
                 backend=backend,
                 sensitivity=sensitivity,

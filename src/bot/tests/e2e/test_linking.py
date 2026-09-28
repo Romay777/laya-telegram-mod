@@ -154,7 +154,13 @@ async def test_promotion_links_the_chat_and_edits_the_linkers_menu(
     assert "Mode: Observation Mode" in lines  # every chat starts in Observation Mode
     assert "Backend: Laya" in lines
     assert "Sensitivity: Balanced" in lines
-    (back,) = edit.reply_markup.inline_keyboard[0]
+    # The Auto-moderation choice follows the status (§13): enable now, or
+    # observe for 2 days first, then Back.
+    (enable,), (observe,), (back,) = edit.reply_markup.inline_keyboard
+    assert enable.text == "🟢 Enable auto-moderation now"
+    assert enable.callback_data == f"enable-auto:{chat_id}"
+    assert observe.text == "🔵 Observe for 2 days first"
+    assert observe.callback_data == f"observe:{chat_id}"
     assert back.callback_data == "menu:home:"
 
     chat = await stored_chat(app.session_maker, chat_id)
@@ -391,7 +397,7 @@ async def test_check_again_after_the_intent_expired_offers_a_new_link(
 
     edit = app.session.calls_of("EditMessageText")[-1].method
     assert "expired" in (edit.text or "")
-    (back,) = edit.reply_markup.inline_keyboard[0]
+    (back,) = edit.reply_markup.inline_keyboard[0]  # the expired screen: just Back
     assert back.callback_data == "menu:home:"
     assert await stored_chat(app.session_maker, chat_id) is None
 

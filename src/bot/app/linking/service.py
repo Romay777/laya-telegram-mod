@@ -426,6 +426,7 @@ class LinkingService:
                 bot=bot,
                 session=session,
                 user=linker,
+                chat_id=facts.chat_id,
                 chat_title=facts.chat_title,
                 mode=chat.mode,
                 backend=chat.backend,
