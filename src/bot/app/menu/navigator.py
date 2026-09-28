@@ -11,7 +11,6 @@ from collections.abc import Sequence
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import MessageEntity
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -334,7 +333,6 @@ class MenuNavigator:
         chat_id: int,
         chat_language: str,
         text: str,
-        entities: Sequence[MessageEntity],
         validation: Validation,
         locale: str,
     ) -> None:
@@ -349,7 +347,6 @@ class MenuNavigator:
                 None,
                 chat_id=chat_id,
                 text=text,
-                entities=entities,
                 validation=validation,
             ),
         )

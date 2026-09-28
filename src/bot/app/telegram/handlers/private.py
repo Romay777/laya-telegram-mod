@@ -902,7 +902,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             template_text=stored_text,
             template_entities=stored_entities,
         )
-        validation = validate_template(i18n.core, str(chat_language), stored_text, entities)
+        validation = validate_template(i18n.core, str(chat_language), stored_text, stored_entities)
         await navigator.show_template_preview(
             bot=bot,
             session=session,
@@ -910,7 +910,6 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             chat_id=int(chat_id),
             chat_language=str(chat_language),
             text=stored_text,
-            entities=entities,
             validation=validation,
             locale=i18n.locale,
         )

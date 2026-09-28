@@ -117,7 +117,6 @@ def preview_screen(
     *,
     chat_id: int,
     text: str,
-    entities: Sequence[MessageEntity],
     validation: Validation,
 ) -> Screen:
     """The Preview (§14): the template rendered with sample values, plus the
@@ -171,17 +170,13 @@ def preview_screen(
 
 
 def validate_template(
-    core: BaseCore,
-    chat_language: str,
-    text: str,
-    entities: Sequence[MessageEntity],
+    core: BaseCore, chat_language: str, text: str, entities: Sequence[dict[str, Any]]
 ) -> Validation:
-    """§14 validation against the Chat Language's worst-case values."""
-    return validate(
-        text,
-        [entity.model_dump(mode="json", exclude_none=True) for entity in entities],
-        worst_replacements(translator_for(core, chat_language)),
-    )
+    """§14 validation against the Chat Language's worst-case values.
+
+    `entities` are the stored ones — `text` and `entities` as §14 keeps them.
+    """
+    return validate(text, entities, worst_replacements(translator_for(core, chat_language)))
 
 
 def strip_custom_emoji(
