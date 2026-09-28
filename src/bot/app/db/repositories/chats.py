@@ -26,6 +26,23 @@ class ChatRepository:
         )
         return list(rows)
 
+    async def due_observation_summaries(self, now: datetime) -> list[Chat]:
+        """Observation Mode chats whose 48-hour summary is due once (§11, §13).
+
+        `summary_sent` keeps the job from repeating: the offer is made once.
+        """
+        rows = await self.session.scalars(
+            select(Chat)
+            .where(
+                Chat.mode == "observation",
+                Chat.observation_summary_at.is_not(None),
+                Chat.observation_summary_at <= now,
+                Chat.summary_sent.is_(False),
+            )
+            .order_by(Chat.observation_summary_at)
+        )
+        return list(rows)
+
     async def create_linked(
         self,
         *,

@@ -173,6 +173,30 @@ class FlaggedMessage(Base):
     purge_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class Suspicion(Base):
+    """A message whose Verdict fell in the middle confidence band (§12).
+
+    The message stays in the chat; an Admin decides — or the scheduler
+    auto-closes it as `expired` after `auto_close_h` (§11). Deciding is
+    first-click-wins: the conditional update fires only while `pending`.
+    """
+
+    __tablename__ = "suspicion"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    check_id: Mapped[int] = mapped_column(
+        ForeignKey("message_check.id", ondelete="CASCADE")
+    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    # pending | punished | dismissed | expired | superseded (§12).
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    decided_by: Mapped[int | None] = mapped_column(BigInteger)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Violation(Base):
     """A confirmed case of a Member's message matching a Category (§12)."""
 
