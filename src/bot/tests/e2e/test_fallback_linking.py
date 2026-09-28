@@ -10,11 +10,19 @@ from collections.abc import AsyncIterator, Iterator
 from itertools import count
 
 import pytest
-from app.db.models import Chat
+from aiogram.methods import GetChat, GetChatMember
+from app.db.models import AdminSubscription, Chat
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.support.harness import TestApp, app_fixture
-from tests.support.updates import private_callback_update, start_update
+from tests.support.telegram import BOT_USER, chat_facts, member_administrator, member_owner
+from tests.support.updates import (
+    forwarded_message_update,
+    private_callback_update,
+    private_text_update,
+    start_update,
+    user,
+)
 
 # The Postgres container is shared, so every test gets its own Admin and chat.
 _admin_ids = count(1100, 10)
@@ -85,3 +93,100 @@ async def test_the_added_already_button_asks_for_the_chat_identifier(
     assert back[0].callback_data == "menu:home:"  # leaving the screen cancels the wait
 
     assert await stored_chat(app.session_maker, chat_id) is None
+
+
+async def waiting_for_the_chat_name(app: TestApp, admin_id: int, menu_message_id: int) -> None:
+    """The Admin pressed "I added the bot already" and the bot waits for input."""
+    await app.feed(
+        private_callback_update(
+            admin_id, "menu:added-already:", menu_message_id, language_code="en"
+        )
+    )
+    app.session.calls.clear()
+
+
+async def stored_subscription(
+    session_maker: async_sessionmaker[AsyncSession], chat_id: int, admin_id: int
+) -> AdminSubscription | None:
+    async with session_maker() as db:
+        return await db.get(AdminSubscription, (chat_id, admin_id))
+
+
+async def test_fallback_linking_via_an_at_username(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    menu_message_id = await on_add_chat_screen(app, admin_id)
+    await waiting_for_the_chat_name(app, admin_id, menu_message_id)
+
+    # The bot is already an administrator of the named chat; the sender is its creator.
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))  # the bot, both rights
+    app.session.script(GetChatMember, member_owner(user(admin_id)))  # the sender
+    await app.feed(private_text_update(admin_id, "@mychat", message_id=77, language_code="en"))
+
+    # The checks ran against the chat the @username named.
+    get_chat = app.session.calls_of("GetChat")[0].method
+    assert get_chat.chat_id == "@mychat"  # sent to Telegram as the Admin wrote it
+    assert app.session.calls_of("GetChatMember")[0].method.chat_id == chat_id  # the bot's rights
+    assert app.session.calls_of("GetChatMember")[1].method.user_id == admin_id  # the sender
+
+    # The read input is deleted (§13); the Menu reports the link.
+    (deleted,) = app.session.calls_of("DeleteMessage")
+    assert (deleted.method.chat_id, deleted.method.message_id) == (admin_id, 77)
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert (edit.text or "").startswith("✅ My Chat linked")
+
+    # The sender is the person linking: the defaults and their subscription (§10, §12).
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None
+    assert chat.linker_id == admin_id
+    assert chat.mode == "observation"
+    subscription = await stored_subscription(app.session_maker, chat_id, admin_id)
+    assert subscription is not None and subscription.alert_mode == "all"
+
+    # The wait is over: a later free-text message is nobody's input.
+    await app.feed(private_text_update(admin_id, "hello", message_id=78, language_code="en"))
+    assert app.session.calls_of("DeleteMessage") == [deleted]  # the stray text was ignored
+    assert len(app.session.calls_of("EditMessageText")) == 1
+
+
+async def test_fallback_linking_via_a_numeric_id(app: TestApp, admin_id: int, chat_id: int) -> None:
+    menu_message_id = await on_add_chat_screen(app, admin_id)
+    await waiting_for_the_chat_name(app, admin_id, menu_message_id)
+
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(private_text_update(admin_id, str(chat_id), message_id=77, language_code="en"))
+
+    get_chat = app.session.calls_of("GetChat")[0].method
+    assert get_chat.chat_id == str(chat_id)  # the -100… id, sent as the Admin wrote it
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert (edit.text or "").startswith("✅ My Chat linked")
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.linker_id == admin_id
+
+
+async def test_fallback_linking_via_a_forwarded_message(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """The forward names the chat it came from; the forwarded message stays (§13)."""
+    menu_message_id = await on_add_chat_screen(app, admin_id)
+    await waiting_for_the_chat_name(app, admin_id, menu_message_id)
+
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        forwarded_message_update(
+            admin_id, origin_chat_id=chat_id, message_id=77, language_code="en"
+        )
+    )
+
+    get_chat = app.session.calls_of("GetChat")[0].method
+    assert get_chat.chat_id == str(chat_id)  # the origin chat of the forward
+    assert app.session.calls_of("DeleteMessage") == []  # the forwarded message is not deleted
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert (edit.text or "").startswith("✅ My Chat linked")
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.linker_id == admin_id

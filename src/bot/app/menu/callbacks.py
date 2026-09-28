@@ -25,9 +25,19 @@ class MenuCallback(CallbackData, prefix="menu"):
 
 
 class LinkCheckCallback(CallbackData, prefix="link-check"):
-    """🔵 Check again on the Linking failure screen (§10 step 5).
+    """🔵 Check again on the deep-link Linking failure screen (§10 step 5).
 
     Carries the `chat_id` so the re-check knows which chat's rights to read.
+    """
+
+    chat_id: int
+
+
+class FallbackCheckCallback(CallbackData, prefix="link-check-fb"):
+    """🔵 Check again on the fallback Linking failure screen (§10).
+
+    A separate factory from the deep-link Check again, because the fallback
+    path has no one-hour token: its re-check never asks for an intent.
     """
 
     chat_id: int

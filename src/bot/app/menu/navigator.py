@@ -136,6 +136,7 @@ class MenuNavigator:
         chat_id: int,
         problems: LinkingProblems,
         locale: str,
+        fallback: bool = False,
     ) -> None:
         await self._show(
             bot=bot,
@@ -146,6 +147,7 @@ class MenuNavigator:
                 chat_title,
                 chat_id=chat_id,
                 problems=problems,
+                fallback=fallback,
             ),
         )
 

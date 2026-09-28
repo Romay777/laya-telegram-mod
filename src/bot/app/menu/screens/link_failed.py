@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.domain.linking import LinkingProblems
 from app.i18n import GetText
-from app.menu.callbacks import LinkCheckCallback, MenuAction
+from app.menu.callbacks import FallbackCheckCallback, LinkCheckCallback, MenuAction
 from app.menu.screen import Screen
 from app.menu.screens.buttons import PRIMARY, button
 
@@ -15,7 +15,9 @@ def link_failed_screen(
     *,
     chat_id: int,
     problems: LinkingProblems,
+    fallback: bool = False,
 ) -> Screen:
+    """`fallback` picks the Check-again flavour: the fallback path has no token."""
     name = chat_title if chat_title else "—"
     lines = [t("menu-link-failed", chat=name)]
     if problems.basic_group:
@@ -30,9 +32,12 @@ def link_failed_screen(
     if problems.from_not_admin:
         lines.append(t("menu-link-problem-not-admin"))
 
+    check = (
+        FallbackCheckCallback(chat_id=chat_id) if fallback else LinkCheckCallback(chat_id=chat_id)
+    )
     check_against = InlineKeyboardButton(
         text=t("menu-link-check-again"),
-        callback_data=LinkCheckCallback(chat_id=chat_id).pack(),
+        callback_data=check.pack(),
         style=PRIMARY,  # the main action on the screen
     )
     return Screen(

@@ -9,6 +9,7 @@ from aiogram.types import (
     ChatMemberMember,
     ChatMemberUpdated,
     Message,
+    MessageOriginChat,
     Update,
     User,
 )
@@ -27,7 +28,11 @@ def user(user_id: int, language_code: str | None = None) -> User:
 
 
 def _private_chat_message(
-    user_id: int, message_id: int, language_code: str | None, text: str | None = None
+    user_id: int,
+    message_id: int,
+    language_code: str | None,
+    text: str | None = None,
+    forward_origin: MessageOriginChat | None = None,
 ) -> Message:
     return Message(
         message_id=message_id,
@@ -35,6 +40,7 @@ def _private_chat_message(
         chat=Chat(id=user_id, type="private"),
         from_user=_user(user_id, language_code),
         text=text,
+        forward_origin=forward_origin,
     )
 
 
@@ -43,6 +49,43 @@ def start_update(user_id: int, language_code: str | None, message_id: int = 1) -
     return Update(
         update_id=0,
         message=_private_chat_message(user_id, message_id, language_code, text="/start"),
+    )
+
+
+def private_text_update(
+    user_id: int,
+    text: str,
+    *,
+    message_id: int,
+    language_code: str | None,
+) -> Update:
+    """A free-text message from the Admin's private chat."""
+    return Update(
+        update_id=0,
+        message=_private_chat_message(user_id, message_id, language_code, text=text),
+    )
+
+
+def forwarded_message_update(
+    user_id: int,
+    *,
+    origin_chat_id: int,
+    message_id: int,
+    language_code: str | None,
+    origin_title: str | None = "My Chat",
+) -> Update:
+    """A message forwarded to the bot from the chat it names (the fallback input)."""
+    return Update(
+        update_id=0,
+        message=_private_chat_message(
+            user_id,
+            message_id,
+            language_code,
+            forward_origin=MessageOriginChat(
+                date=datetime.now(UTC),
+                sender_chat=Chat(id=origin_chat_id, type="supergroup", title=origin_title),
+            ),
+        ),
     )
 
 

@@ -3,7 +3,7 @@
 from typing import cast
 
 from aiogram import Bot, F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram_i18n import I18nContext
@@ -110,5 +110,27 @@ def create_private_router() -> Router:
                 )
 
         await callback.answer()
+
+    @router.message(StateFilter(FallbackLinkStates.waiting_for_chat), F.chat.type == "private")
+    async def fallback_chat_input(
+        message: Message,
+        state: FSMContext,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        linking: LinkingService,
+        i18n: I18nContext,
+    ) -> None:
+        # The fallback Linking path (§10): the Admin named the chat.
+        await linking.handle_fallback_input(
+            bot=bot,
+            session=session,
+            navigator=navigator,
+            user=bot_user,
+            state=state,
+            message=message,
+            locale=i18n.locale,
+        )
 
     return router

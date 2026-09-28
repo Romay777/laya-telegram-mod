@@ -20,9 +20,16 @@ from typing import cast
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
+from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.base import StorageKey
-from aiogram.types import ChatMemberUpdated
+from aiogram.types import (
+    ChatFullInfo,
+    ChatMemberUpdated,
+    Message,
+    MessageOriginChannel,
+    MessageOriginChat,
+)
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -33,7 +40,7 @@ from app.db.repositories.chats import ChatRepository
 from app.db.repositories.link_intents import LinkIntentRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.db.repositories.users import BotUserRepository
-from app.domain.linking import LinkingProblems, linking_problems
+from app.domain.linking import LinkingProblems, linking_problems, parse_chat_ref
 from app.i18n import guess_locale, translator_for
 from app.linking.deep_link import INTENT_TTL, startgroup_url
 from app.menu.navigator import MenuNavigator
@@ -49,6 +56,23 @@ class FallbackLinkStates(StatesGroup):
     """The FSM state of the fallback path: the bot waits for the chat's name."""
 
     waiting_for_chat = State()
+
+
+def chat_ref_from_message(message: Message) -> str | None:
+    """The chat one fallback input names (§10): a forward's origin, or the text.
+
+    A forwarded message names the chat it came from, whatever text it carries;
+    a forwarded message from a person names nothing. Plain text goes through
+    the domain parser.
+    """
+    origin = message.forward_origin
+    if origin is None:
+        return parse_chat_ref(message.text)
+    if isinstance(origin, MessageOriginChat):
+        return str(origin.sender_chat.id)
+    if isinstance(origin, MessageOriginChannel):
+        return str(origin.chat.id)
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,7 +230,53 @@ class LinkingService:
         chat_id: int,
         locale: str,
     ) -> None:
-        """🔵 Check again from the failure screen: the same checks, live (§10 step 5)."""
+        """🔵 Check again from the deep-link failure screen: checks, then the token (§10)."""
+        await self._recheck_and_link(
+            bot=bot,
+            session=session,
+            navigator=navigator,
+            user=user,
+            chat_id=chat_id,
+            locale=locale,
+            fallback=False,
+        )
+
+    async def fallback_check_again(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        navigator: MenuNavigator,
+        user: BotUser,
+        chat_id: int,
+        locale: str,
+    ) -> None:
+        """🔵 Check again on the fallback failure screen: the same checks, no token (§10).
+
+        The fallback path never mints an intent, so there is nothing to
+        consume: the chat links when the checks pass.
+        """
+        await self._recheck_and_link(
+            bot=bot,
+            session=session,
+            navigator=navigator,
+            user=user,
+            chat_id=chat_id,
+            locale=locale,
+            fallback=True,
+        )
+
+    async def _recheck_and_link(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        navigator: MenuNavigator,
+        user: BotUser,
+        chat_id: int,
+        locale: str,
+        fallback: bool,
+    ) -> None:
         facts = await self._facts_live(bot, chat_id, user.user_id)
         problems = self._problems(facts)
         if problems:
@@ -218,34 +288,42 @@ class LinkingService:
                 chat_id=chat_id,
                 problems=problems,
                 locale=locale,
+                fallback=fallback,
             )
             return
 
-        intent = await LinkIntentRepository(session).consume_valid(
-            user.user_id, now=self._clock.now()
-        )
-        if intent is None:
-            # The intent expired while the failure sat on the screen.
-            await navigator.show_link_expired(bot=bot, session=session, user=user, locale=locale)
-            return
+        if not fallback:
+            intent = await LinkIntentRepository(session).consume_valid(
+                user.user_id, now=self._clock.now()
+            )
+            if intent is None:
+                # The intent expired while the failure sat on the screen.
+                await navigator.show_link_expired(
+                    bot=bot, session=session, user=user, locale=locale
+                )
+                return
 
         chat = await self._complete_link(
             session, facts, chat_language=user.language or FALLBACK_LANGUAGE
         )
         await self._show_linked(bot, session, navigator, user, facts, chat, locale)
 
-    async def _facts_live(self, bot: Bot, chat_id: int, linker_id: int) -> PromotionFacts:
+    async def _facts_live(self, bot: Bot, chat_id: int | str, linker_id: int) -> PromotionFacts:
         """The same facts as a promotion, read live instead of from the update."""
         chat = await bot.get_chat(chat_id)
-        bot_member = await bot.get_chat_member(chat_id, bot.id)
+        return await self._facts_for(bot, chat, linker_id)
+
+    async def _facts_for(self, bot: Bot, chat: ChatFullInfo, linker_id: int) -> PromotionFacts:
+        """The promotion facts of a chat the bot can already see, read live."""
+        bot_member = await bot.get_chat_member(chat.id, bot.id)
         return PromotionFacts(
-            chat_id=chat_id,
+            chat_id=chat.id,
             chat_title=chat.title,
             chat_type=chat.type,
             can_delete_messages=bool(getattr(bot_member, "can_delete_messages", False)),
             can_restrict_members=bool(getattr(bot_member, "can_restrict_members", False)),
             linker_id=linker_id,
-            linker_status=await self._member_status(bot, chat_id, linker_id),
+            linker_status=await self._member_status(bot, chat.id, linker_id),
         )
 
     def _locale(self, linker: BotUser | None, telegram_language_code: str | None) -> str:
@@ -253,6 +331,69 @@ class LinkingService:
         if linker is not None and linker.language:
             return linker.language
         return guess_locale(telegram_language_code)
+
+    async def handle_fallback_input(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        navigator: MenuNavigator,
+        user: BotUser,
+        state: FSMContext,
+        message: Message,
+        locale: str,
+    ) -> None:
+        """The fallback path (§10): the sender takes the deep link's place.
+
+        The chat the input names goes through the same three checks as a
+        promotion, read live. The input message is deleted once read — the
+        forwarded message is the one exception (§13). An input that names no
+        chat the bot can see re-prompts and keeps waiting.
+        """
+        chat_ref = chat_ref_from_message(message)
+        await self._delete_input(bot, message)
+
+        if chat_ref is not None:
+            try:
+                chat = await bot.get_chat(chat_ref)
+                facts = await self._facts_for(bot, chat, user.user_id)
+            except TelegramAPIError:
+                facts = None
+        else:
+            facts = None
+
+        if facts is None:
+            await navigator.show_enter_chat_again(
+                bot=bot, session=session, user=user, locale=locale
+            )
+            return
+
+        await state.clear()  # the attempt is spent either way
+        problems = self._problems(facts)
+        if problems:
+            await navigator.show_link_failed(
+                bot=bot,
+                session=session,
+                user=user,
+                chat_title=facts.chat_title,
+                chat_id=facts.chat_id,
+                problems=problems,
+                locale=locale,
+                fallback=True,
+            )
+            return
+
+        chat_row = await self._complete_link(
+            session, facts, chat_language=user.language or FALLBACK_LANGUAGE
+        )
+        await self._show_linked(bot, session, navigator, user, facts, chat_row, locale)
+
+    async def _delete_input(self, bot: Bot, message: Message) -> None:
+        """A read input is deleted; a forwarded message is the one exception (§13)."""
+        if message.forward_origin is not None:
+            return
+        with contextlib.suppress(TelegramAPIError):
+            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
 
     async def _complete_link(
         self, session: AsyncSession, facts: PromotionFacts, *, chat_language: str
