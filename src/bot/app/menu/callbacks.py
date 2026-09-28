@@ -79,3 +79,26 @@ class LiftRestrictionCallback(CallbackData, prefix="lift"):
 
     chat_id: int
     violation_id: int
+
+
+class AppealCallback(CallbackData, prefix="appeal"):
+    """🙋 It's a mistake, the Appeal button under a Chat Notice (§7, §8).
+
+    The callback data carries the Violation id; the presser must be the
+    restricted Member, so this one button is not Admin-scoped.
+    """
+
+    chat_id: int
+    violation_id: int
+
+
+class AppealDecideCallback(CallbackData, prefix="appeal-decide"):
+    """🟢 Lift restriction / 🔴 Reject on an Appeal's Admin Alert copy (§8).
+
+    Carries the `chat_id` so the handler can re-check Admin access (§13);
+    the first Admin to press decides (§9).
+    """
+
+    chat_id: int
+    appeal_id: int
+    approve: bool

@@ -21,3 +21,4 @@ notice-duration-days = {$days ->
     [many] {$days} дней
    *[other] {$days} дня
 }
+notice-appeal-button = 🙋 Это ошибка

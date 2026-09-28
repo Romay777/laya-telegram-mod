@@ -9,7 +9,7 @@ recorded in `admin_alert`, so any decision can later edit every copy.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.alerts.rendering import render_violation_alert
 from app.clock import Clock
-from app.db.models import Chat
+from app.db.models import BotUser, Chat
 from app.db.repositories.alerts import AlertRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.db.repositories.users import BotUserRepository
@@ -35,6 +35,9 @@ PACE_S = 1.0
 
 #: The language of an Admin who never picked one (§15 fallback).
 FALLBACK_LANGUAGE = "en"
+
+#: The alert modes that receive Appeals (§9): `all` and `appeals`.
+APPEAL_MODES = ("all", "appeals")
 
 
 def lift_keyboard(t: GetText, chat_id: int, violation_id: int) -> InlineKeyboardMarkup:
@@ -88,18 +91,10 @@ class AlertFanout:
         recipients = await AdminSubscriptionRepository(session).user_ids_with_mode(
             chat.chat_id, alert_mode="all"
         )
-        for admin_id in recipients:
-            user = await BotUserRepository(session).get(admin_id)
-            if user is not None and not user.reachable:
-                continue  # a 403 marked them unreachable: skipped from then on (§9)
-            if not await admin_cache.is_admin(bot, chat.chat_id, admin_id):
-                continue  # no longer an Admin: alerts stop, the row is kept (§10)
-
+        async for admin_id, user, t in self._recipients(
+            bot, session, admin_cache, chat, recipients
+        ):
             await self._pace_for(admin_id)
-            t = translator_for(
-                self._core,
-                user.language if user is not None and user.language else FALLBACK_LANGUAGE,
-            )
             text, entities = render_violation_alert(
                 t,
                 chat_title=chat.title or str(chat.chat_id),
@@ -129,6 +124,50 @@ class AlertFanout:
                 subject_type="violation",
                 subject_id=violation_id,
             )
+
+    async def has_appeal_recipient(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+    ) -> bool:
+        """Whether an Appeal would reach at least one Admin of the chat (§7, §9).
+
+        The Chat Notice carries its 🙋 button only while this holds: the
+        recipients are the current Admins (Telegram is the source of Admin
+        status) who have started the bot and subscribe at `all` or `appeals`.
+        """
+        subscribers = await AdminSubscriptionRepository(session).user_ids_with_modes(
+            chat.chat_id, modes=APPEAL_MODES
+        )
+        async for _admin_id, _user, _t in self._recipients(
+            bot, session, admin_cache, chat, subscribers
+        ):
+            return True
+        return False
+
+    async def _recipients(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        admin_cache: AdminCache,
+        chat: Chat,
+        admin_ids: list[int],
+    ) -> AsyncIterator[tuple[int, BotUser | None, GetText]]:
+        """Yield the given subscribers an alert can actually reach (§9, §10)."""
+        for admin_id in admin_ids:
+            user = await BotUserRepository(session).get(admin_id)
+            if user is not None and not user.reachable:
+                continue  # a 403 marked them unreachable: skipped from then on (§9)
+            if not await admin_cache.is_admin(bot, chat.chat_id, admin_id):
+                continue  # no longer an Admin: alerts stop, the row is kept (§10)
+            t = translator_for(
+                self._core,
+                user.language if user is not None and user.language else FALLBACK_LANGUAGE,
+            )
+            yield admin_id, user, t
 
     async def _pace_for(self, admin_id: int) -> None:
         """Wait out the private-chat pace this Admin's alerts must keep."""

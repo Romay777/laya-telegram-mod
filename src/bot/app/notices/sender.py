@@ -5,17 +5,18 @@ The text is the default one in the Chat Language — the Notice Template of
 forms, so `1 час`, `3 часа`, `5 часов` and "forever" / "навсегда" are all
 correct without code per case.
 
-The Appeal button is not part of this ticket: Appeals are a later ticket,
-and §7 leaves the button out while no Admin has Appeals enabled.
+The Appeal button is left out while no Admin of the chat receives Appeals;
+the caller decides and passes the Violation id only then (§7, §8).
 """
 
 from datetime import datetime, timedelta
 
 from aiogram import Bot
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram_i18n.cores.base import BaseCore
 
 from app.i18n import GetText, translator_for
+from app.menu.callbacks import AppealCallback
 
 #: The default text lives longer than a forever Restriction (§7): the notice
 #: is removed `max_lifetime_h` after posting when the Restriction never ends.
@@ -43,6 +44,26 @@ def render_notice(
         user=name,
         reason=t(f"notice-reason-{category}"),
         duration=duration_text(t, step_seconds),
+    )
+
+
+def appeal_keyboard(t: GetText, *, chat_id: int, violation_id: int) -> InlineKeyboardMarkup:
+    """The one inline button of a Chat Notice: 🙋 It's a mistake (§7).
+
+    The callback data carries the Violation id; the button speaks the Chat
+    Language, like the rest of the notice (§15).
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("notice-appeal-button"),
+                    callback_data=AppealCallback(
+                        chat_id=chat_id, violation_id=violation_id
+                    ).pack(),
+                )
+            ]
+        ]
     )
 
 
@@ -83,12 +104,19 @@ async def send_notice(
     name: str,
     category: str,
     step_seconds: int,
+    appeal_violation_id: int | None = None,
 ) -> Message:
-    """Post the Chat Notice in the chat's own language (§15)."""
-    text = render_notice(
-        translator_for(core, chat_language),
-        name=name,
-        category=category,
-        step_seconds=step_seconds,
+    """Post the Chat Notice in the chat's own language (§15).
+
+    With `appeal_violation_id` the notice carries the 🙋 It's a mistake
+    button; without it — no Admin receives Appeals, the notice was dropped,
+    or the sender was a channel — the button is left out (§7).
+    """
+    t = translator_for(core, chat_language)
+    text = render_notice(t, name=name, category=category, step_seconds=step_seconds)
+    markup = (
+        appeal_keyboard(t, chat_id=chat_id, violation_id=appeal_violation_id)
+        if appeal_violation_id is not None
+        else None
     )
-    return await bot.send_message(chat_id=chat_id, text=text)
+    return await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)

@@ -156,6 +156,11 @@ class ModerationPipeline:
         await restrict_member(
             bot, chat.chat_id, sender.id, restricted_until=violation.restricted_until
         )
+        # §7: the 🙋 button is on the notice only while an Appeal would reach
+        # an Admin — a channel sender gets no button either way (§4).
+        appeal_recipient = await self._fanout.has_appeal_recipient(
+            bot, session, admin_cache=admin_cache, chat=chat
+        )
         notice = await send_notice(
             bot,
             self._core,
@@ -164,6 +169,7 @@ class ModerationPipeline:
             name=sender.first_name or str(sender.id),
             category=decision.category,
             step_seconds=violation.restriction_seconds or 0,
+            appeal_violation_id=violation.id if appeal_recipient else None,
         )
         await repo.save_notice(
             violation.id,

@@ -15,3 +15,4 @@ notice-duration-days = {$days ->
     [one] {$days} day
    *[other] {$days} days
 }
+notice-appeal-button = 🙋 It's a mistake
