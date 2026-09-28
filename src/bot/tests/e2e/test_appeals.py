@@ -6,17 +6,26 @@ copy. The deleted message stays deleted throughout.
 """
 
 from collections.abc import AsyncIterator, Iterator
+from datetime import timedelta
 from itertools import count
 
 import pytest
-from aiogram.methods import GetChatMember
-from app.db.models import AdminAlert, Appeal, Violation
+from aiogram.methods import GetChat, GetChatMember
+from aiogram.types import ChatPermissions
+from app.db.models import AdminAlert, Appeal, ChatNotice, FlaggedMessage, Violation
 from app.menu.callbacks import AppealCallback, AppealDecideCallback
+from app.scheduler import Scheduler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tests.support.harness import TestApp, app_fixture, auto_moderation_chat
-from tests.support.telegram import member_member
+from tests.support.harness import (
+    FIXED_NOW,
+    TestApp,
+    app_fixture,
+    auto_moderation_chat,
+    started_admin,
+)
+from tests.support.telegram import chat_facts, member_administrator, member_member, member_owner
 from tests.support.updates import (
     group_callback_update,
     group_message_update,
@@ -31,6 +40,7 @@ _chat_ids = count(-100900, -10)
 
 SPAMMY = {"spam": 0.97, "ads": 0.01, "insult": 0.01, "clean": 0.01}
 SPAM_TEXT = "Buy cheap crypto now, DM me https://t.me/+abc"
+DEFAULT_PERMISSIONS = ChatPermissions(can_send_messages=True, can_send_polls=True)
 
 
 @pytest.fixture
@@ -70,6 +80,13 @@ async def alert_copy(
                 AdminAlert.subject_type == "appeal", AdminAlert.subject_id == appeal_id
             )
         )
+
+
+async def fresh_notice(
+    session_maker: async_sessionmaker[AsyncSession], violation_id: int
+) -> ChatNotice | None:
+    async with session_maker() as db:
+        return await db.get(ChatNotice, violation_id)
 
 
 async def spam_message(app: TestApp, chat_id: int, member_id: int, message_id: int) -> None:
@@ -236,3 +253,223 @@ async def test_a_second_appeal_is_refused_with_a_toast(
     async with app.session_maker() as db:
         appeals = (await db.execute(select(Appeal))).scalars().all()
     assert len(appeals) == 1
+
+
+async def opted_in_second_admin(app: TestApp, admin_id: int, chat_id: int, *, mode: str) -> int:
+    """Link the chat, arm Auto-moderation, and opt a second Admin in at `mode`."""
+    await auto_moderation_chat(app, admin_id, chat_id)
+    second_id = next(_admin_ids)
+    # The second Admin is a real Telegram admin of the chat and opts in
+    # through the My alerts screen (§9).
+    app.session.script(GetChatMember, member_administrator(user(second_id)))
+    other_menu = await started_admin(app, second_id)
+    for data in (
+        f"chat:{chat_id}",
+        f"chat-settings:{chat_id}",
+        f"chat-alerts:{chat_id}:",
+        f"chat-alerts:{chat_id}:{mode}",
+    ):
+        await app.feed(private_callback_update(second_id, data, other_menu, language_code="en"))
+    return second_id
+
+
+async def the_appeal(session_maker: async_sessionmaker[AsyncSession]) -> Appeal:
+    async with session_maker() as db:
+        (appeal,) = (await db.execute(select(Appeal))).scalars().all()
+        return appeal
+
+
+async def appeal_alert_copies(
+    session_maker: async_sessionmaker[AsyncSession], appeal_id: int
+) -> list[AdminAlert]:
+    async with session_maker() as db:
+        return list(
+            (
+                await db.execute(
+                    select(AdminAlert)
+                    .where(
+                        AdminAlert.subject_type == "appeal",
+                        AdminAlert.subject_id == appeal_id,
+                    )
+                    .order_by(AdminAlert.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def filed_appeal(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> tuple[Appeal, list[int], int]:
+    """A violation, an appeal on it, the alert copies' ids, the notice's id."""
+    await spam_message(app, chat_id, member_id, message_id=77)
+    notice = app.session.calls_of("SendMessage")[0]
+    violation = await the_violation(app.session_maker)
+    await appeal_press(app, chat_id, member_id, violation.id, notice.result.message_id)
+    appeal = await the_appeal(app.session_maker)
+    copies = await appeal_alert_copies(app.session_maker, appeal.id)
+    return appeal, [copy.message_id for copy in copies], notice.result.message_id
+
+
+async def test_approving_lifts_the_restriction_and_shows_the_outcome_everywhere(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    second_id = await opted_in_second_admin(app, admin_id, chat_id, mode="appeals")
+    appeal, copy_ids, notice_message_id = await filed_appeal(app, admin_id, member_id, chat_id)
+    assert len(copy_ids) == 2  # the Linker (All) and the second Admin (Appeals only)
+    app.session.calls.clear()
+
+    # The Linker presses 🟢 Lift restriction on their copy.
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", permissions=DEFAULT_PERMISSIONS))
+    await app.feed(
+        private_callback_update(
+            admin_id,
+            AppealDecideCallback(chat_id=chat_id, appeal_id=appeal.id, approve=True).pack(),
+            copy_ids[0],
+            language_code="en",
+            username="alpha",
+        )
+    )
+
+    # Default permissions back, the False Positive recorded, the notice and
+    # every copy show the outcome, buttons gone (§6, §8).
+    assert app.session.call_names() == [
+        "GetChat",
+        "RestrictChatMember",
+        "EditMessageText",  # the notice
+        "EditMessageText",  # the Linker's copy
+        "EditMessageText",  # the second Admin's copy
+        "AnswerCallbackQuery",
+    ]
+    (restrict,) = app.session.calls_of("RestrictChatMember")
+    assert (restrict.method.chat_id, restrict.method.user_id) == (chat_id, member_id)
+    assert restrict.method.permissions.can_send_messages is True
+    assert restrict.method.until_date == 0
+
+    notice_edit, first_edit, second_edit = app.session.calls_of("EditMessageText")
+    assert (notice_edit.method.chat_id, notice_edit.method.message_id) == (
+        chat_id,
+        notice_message_id,
+    )
+    assert notice_edit.method.text == "✅ Restriction lifted by an admin"
+    for edit in (first_edit, second_edit):
+        assert edit.method.reply_markup is None
+    assert first_edit.method.text == "✅ Restriction lifted by @alpha"
+    assert second_edit.method.text == "✅ Restriction lifted by @alpha"
+
+    decided = await the_appeal(app.session_maker)
+    assert decided.status == "approved"
+    assert decided.decided_by == admin_id
+    assert decided.decided_at is not None
+    violation = await the_violation(app.session_maker)
+    assert violation.revoked_by == admin_id  # a False Positive now (§6)
+    # The notice is scheduled for removal after outcome_visible_s (§7, §8).
+    stored_notice = await fresh_notice(app.session_maker, violation.id)
+    assert stored_notice is not None
+    assert stored_notice.delete_at == FIXED_NOW + timedelta(seconds=600)
+
+
+async def test_rejecting_keeps_the_restriction_and_shows_the_outcome_everywhere(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    await auto_moderation_chat(app, admin_id, chat_id)
+    appeal, copy_ids, notice_message_id = await filed_appeal(app, admin_id, member_id, chat_id)
+    app.session.calls.clear()
+
+    await app.feed(
+        private_callback_update(
+            admin_id,
+            AppealDecideCallback(chat_id=chat_id, appeal_id=appeal.id, approve=False).pack(),
+            copy_ids[0],
+            language_code="en",
+            username="alpha",
+        )
+    )
+
+    # No lifting: no getChat, no restrict. The notice and the copy show the
+    # rejection (§8).
+    assert app.session.call_names() == [
+        "EditMessageText",  # the notice
+        "EditMessageText",  # the Linker's copy
+        "AnswerCallbackQuery",
+    ]
+    notice_edit, copy_edit = app.session.calls_of("EditMessageText")
+    assert notice_edit.method.chat_id == chat_id
+    assert notice_edit.method.text == "❌ Appeal rejected"
+    assert copy_edit.method.text == "❌ Appeal rejected by @alpha"
+    assert copy_edit.method.reply_markup is None
+
+    decided = await the_appeal(app.session_maker)
+    assert decided.status == "rejected"
+    assert decided.decided_by == admin_id
+    violation = await the_violation(app.session_maker)
+    assert violation.revoked_at is None  # the Restriction stands (§8)
+    stored_notice = await fresh_notice(app.session_maker, violation.id)
+    assert stored_notice is not None
+    assert stored_notice.delete_at == FIXED_NOW + timedelta(seconds=600)
+
+
+async def test_a_late_decision_click_learns_who_was_first(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    second_id = await opted_in_second_admin(app, admin_id, chat_id, mode="appeals")
+    appeal, copy_ids, _notice_message_id = await filed_appeal(app, admin_id, member_id, chat_id)
+    # The first click approves and lifts, so the chat's default permissions are read.
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", permissions=DEFAULT_PERMISSIONS))
+    await app.feed(
+        private_callback_update(
+            admin_id,
+            AppealDecideCallback(chat_id=chat_id, appeal_id=appeal.id, approve=True).pack(),
+            copy_ids[0],
+            language_code="en",
+            username="alpha",
+        )
+    )
+    app.session.calls.clear()
+
+    # The second Admin presses 🔴 Reject on the already-approved appeal.
+    app.session.script(GetChatMember, member_owner(user(admin_id, username="alpha")))
+    await app.feed(
+        private_callback_update(
+            second_id,
+            AppealDecideCallback(chat_id=chat_id, appeal_id=appeal.id, approve=False).pack(),
+            copy_ids[1],
+            language_code="en",
+            username="beta",
+        )
+    )
+
+    assert app.session.call_names() == ["GetChatMember", "AnswerCallbackQuery"]
+    (answer,) = app.session.calls_of("AnswerCallbackQuery")
+    assert answer.method.text == "Already decided by @alpha"
+    decided = await the_appeal(app.session_maker)
+    assert decided.status == "approved"  # the first click's record stands
+    assert decided.decided_by == admin_id
+
+
+async def test_an_appeal_after_the_purge_says_the_text_is_no_longer_stored(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    await auto_moderation_chat(app, admin_id, chat_id)
+    await spam_message(app, chat_id, member_id, message_id=77)
+    notice = app.session.calls_of("SendMessage")[0]
+    violation = await the_violation(app.session_maker)
+
+    # The retention passes while the notice is still up: the stored text goes.
+    async with app.session_maker() as db:
+        flagged = await db.get(FlaggedMessage, violation.check_id)
+        assert flagged is not None
+        flagged.purge_at = FIXED_NOW + timedelta(seconds=1)
+        await db.commit()
+    app.clock.advance(timedelta(minutes=1))
+    await Scheduler(bot=app.bot, session_maker=app.session_maker, clock=app.clock).run_once()
+    app.session.calls.clear()
+
+    await appeal_press(app, chat_id, member_id, violation.id, notice.result.message_id)
+
+    (alert,) = app.session.calls_of("SendMessage")
+    text = alert.method.text or ""
+    assert "The message text is no longer stored." in text  # the purged case (§8)
+    assert SPAM_TEXT not in text
+    assert not [entity for entity in alert.method.entities or [] if entity.type == "blockquote"]
