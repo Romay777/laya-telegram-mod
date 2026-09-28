@@ -19,7 +19,7 @@ def chat_screen(
     sensitivity: str,
 ) -> Screen:
     name = chat_title if chat_title else "—"
-    text = "\n".join([name, "", *_status_lines(t, mode, backend, sensitivity)])
+    text = "\n".join([name, "", *status_lines(t, mode, backend, sensitivity)])
     return Screen(
         text=text,
         reply_markup=InlineKeyboardMarkup(
@@ -28,7 +28,7 @@ def chat_screen(
     )
 
 
-def _status_lines(t: GetText, mode: str, backend: str, sensitivity: str) -> list[str]:
+def status_lines(t: GetText, mode: str, backend: str, sensitivity: str) -> list[str]:
     return [
         t("menu-chat-mode", mode=_mode_label(t, mode)),
         t("menu-chat-backend", backend=_BACKENDS.get(backend, backend)),

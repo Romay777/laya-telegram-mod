@@ -60,7 +60,7 @@ class MenuNavigator:
         session: AsyncSession,
         user: BotUser,
         locale: str,
-        chats: Sequence[ChatSummary] = (),
+        chats: Sequence[ChatSummary],
     ) -> None:
         await self._show(
             bot=bot,

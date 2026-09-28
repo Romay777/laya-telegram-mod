@@ -6,7 +6,7 @@ from app.i18n import GetText
 from app.menu.callbacks import MenuAction
 from app.menu.screen import Screen
 from app.menu.screens.buttons import button
-from app.menu.screens.chat import _status_lines
+from app.menu.screens.chat import status_lines
 
 
 def linked_chat_screen(
@@ -20,7 +20,7 @@ def linked_chat_screen(
     """✅ {chat} linked, then the Chat screen's mode · backend · Sensitivity."""
     name = chat_title if chat_title else "—"
     text = "\n".join(
-        [t("menu-link-success", chat=name), "", *_status_lines(t, mode, backend, sensitivity)]
+        [t("menu-link-success", chat=name), "", *status_lines(t, mode, backend, sensitivity)]
     )
     return Screen(
         text=text,

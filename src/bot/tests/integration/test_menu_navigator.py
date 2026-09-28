@@ -204,7 +204,7 @@ async def test_uneditable_menu_message_is_replaced_by_a_new_one(
         TelegramBadRequest(method=None, message="Bad Request: message to edit not found"),
     )
 
-    await navigator.show_home(bot=bot, session=db_session, user=user, locale="en")
+    await navigator.show_home(bot=bot, session=db_session, user=user, locale="en", chats=[])
     await db_session.commit()
 
     assert "SendMessage" in session.call_names()
