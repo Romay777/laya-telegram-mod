@@ -10,12 +10,20 @@ from collections.abc import AsyncIterator, Iterator
 from itertools import count
 
 import pytest
+from aiogram.exceptions import TelegramNotFound
 from aiogram.methods import GetChat, GetChatMember
-from app.db.models import AdminSubscription, Chat
+from app.db.models import AdminSubscription, Chat, LinkIntent
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.support.harness import TestApp, app_fixture
-from tests.support.telegram import BOT_USER, chat_facts, member_administrator, member_owner
+from tests.support.telegram import (
+    BOT_USER,
+    chat_facts,
+    member_administrator,
+    member_member,
+    member_owner,
+)
 from tests.support.updates import (
     forwarded_message_update,
     private_callback_update,
@@ -190,3 +198,102 @@ async def test_fallback_linking_via_a_forwarded_message(
     assert (edit.text or "").startswith("✅ My Chat linked")
     chat = await stored_chat(app.session_maker, chat_id)
     assert chat is not None and chat.linker_id == admin_id
+
+
+async def test_an_input_that_names_no_chat_reprompts_and_keeps_waiting(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    menu_message_id = await on_add_chat_screen(app, admin_id)
+    await waiting_for_the_chat_name(app, admin_id, menu_message_id)
+
+    await app.feed(private_text_update(admin_id, "hello", message_id=77, language_code="en"))
+
+    # The read input is deleted, nothing is linked, and the prompt returns with why.
+    (deleted,) = app.session.calls_of("DeleteMessage")
+    assert (deleted.method.chat_id, deleted.method.message_id) == (admin_id, 77)
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert "couldn't see that chat" in (edit.text or "")
+    assert await stored_chat(app.session_maker, chat_id) is None
+
+    # The bot still waits: the next message that names a chat links it.
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(private_text_update(admin_id, str(chat_id), message_id=78, language_code="en"))
+
+    assert (app.session.calls_of("EditMessageText")[-1].method.text or "").startswith(
+        "✅ My Chat linked"
+    )
+    assert await stored_chat(app.session_maker, chat_id) is not None
+
+
+async def test_a_chat_the_bot_cannot_see_reprompts(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """A @username the bot can't resolve is not a Linking attempt (§10)."""
+    menu_message_id = await on_add_chat_screen(app, admin_id)
+    await waiting_for_the_chat_name(app, admin_id, menu_message_id)
+
+    app.session.script(GetChat, TelegramNotFound(method=None, message="Chat not found"))
+    await app.feed(private_text_update(admin_id, "@nowhere", message_id=77, language_code="en"))
+
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert "couldn't see that chat" in (edit.text or "")
+    assert app.session.calls_of("GetChatMember") == []  # the checks never ran
+    assert await stored_chat(app.session_maker, chat_id) is None
+
+    # The bot still waits: the same Admin can name a chat that exists.
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(private_text_update(admin_id, str(chat_id), message_id=78, language_code="en"))
+
+    assert (app.session.calls_of("EditMessageText")[-1].method.text or "").startswith(
+        "✅ My Chat linked"
+    )
+
+
+async def test_fallback_failure_lists_whats_missing_and_check_again_links(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """The sender is not an admin of the named chat: the failure screen, then success."""
+    menu_message_id = await on_add_chat_screen(app, admin_id)
+    await waiting_for_the_chat_name(app, admin_id, menu_message_id)
+
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    app.session.script(GetChatMember, member_member(user(admin_id)))  # the sender
+    await app.feed(private_text_update(admin_id, str(chat_id), message_id=77, language_code="en"))
+
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert "not an admin" in (edit.text or "")
+    (check_against,), (_back,) = edit.reply_markup.inline_keyboard
+    # The fallback path has no one-hour token: its Check again asks for no intent.
+    assert check_against.callback_data == f"link-check-fb:{chat_id}"
+    assert await stored_chat(app.session_maker, chat_id) is None
+    app.session.calls.clear()
+
+    # The sender was promoted in the meantime; Check again re-runs the checks live.
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        private_callback_update(
+            admin_id, f"link-check-fb:{chat_id}", menu_message_id, language_code="en"
+        )
+    )
+
+    assert (app.session.calls_of("EditMessageText")[-1].method.text or "").startswith(
+        "✅ My Chat linked"
+    )
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.linker_id == admin_id
+    async with app.session_maker() as db:
+        intents = (
+            (await db.execute(select(LinkIntent).where(LinkIntent.user_id == admin_id)))
+            .scalars()
+            .all()
+        )
+    # The one token minted at Add to chat is untouched: the fallback path has no
+    # token and its Check again consumes nothing (§10).
+    assert len(intents) == 1
