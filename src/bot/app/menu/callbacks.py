@@ -16,6 +16,7 @@ class MenuAction(StrEnum):
     HOME = "home"
     HOW_IT_WORKS = "how-it-works"
     ADD_TO_CHAT = "add-to-chat"
+    ADDED_ALREADY = "added-already"
 
 
 class MenuCallback(CallbackData, prefix="menu"):

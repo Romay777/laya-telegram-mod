@@ -4,13 +4,14 @@ from typing import cast
 
 from aiogram import Bot, F, Router
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram_i18n import I18nContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser
 from app.i18n import SUPPORTED_LANGUAGES
-from app.linking.service import LinkingService
+from app.linking.service import FallbackLinkStates, LinkingService
 from app.menu.callbacks import MenuAction, MenuCallback
 from app.menu.navigator import MenuNavigator
 
@@ -27,7 +28,11 @@ def create_private_router() -> Router:
         navigator: MenuNavigator,
         linking: LinkingService,
         i18n: I18nContext,
+        state: FSMContext,
     ) -> None:
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
         # A deferred Linking (the Linker was prompted in the group) finishes here.
         await linking.complete_pending_start(bot=bot, session=session, user=bot_user)
 
@@ -54,12 +59,27 @@ def create_private_router() -> Router:
         navigator: MenuNavigator,
         linking: LinkingService,
         i18n: I18nContext,
+        state: FSMContext,
     ) -> None:
+        # Any Menu navigation leaves the fallback input screen, so no free-text
+        # message is ever consumed as a chat name behind the Admin's back (§13).
+        await state.clear()
+
         if callback_data.action is MenuAction.ADD_TO_CHAT:
             # The primary Linking path starts here (§10 step 1).
             url = await linking.start_link(bot=bot, session=session, user=bot_user)
             await navigator.show_add_chat(
                 bot=bot, session=session, user=bot_user, url=url, locale=i18n.locale
+            )
+            await callback.answer()
+            return
+
+        if callback_data.action is MenuAction.ADDED_ALREADY:
+            # The fallback Linking path starts here (§10): the bot waits for
+            # the chat's @username, id or a forwarded message.
+            await state.set_state(FallbackLinkStates.waiting_for_chat)
+            await navigator.show_enter_chat(
+                bot=bot, session=session, user=bot_user, locale=i18n.locale
             )
             await callback.answer()
             return

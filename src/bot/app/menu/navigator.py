@@ -19,6 +19,7 @@ from app.i18n import translator_for
 from app.menu.screen import Screen
 from app.menu.screens import (
     add_chat_screen,
+    enter_chat_screen,
     home_screen,
     how_it_works_screen,
     language_screen,
@@ -77,6 +78,27 @@ class MenuNavigator:
             session=session,
             user=user,
             screen=add_chat_screen(translator_for(self.core, locale), url),
+        )
+
+    async def show_enter_chat(
+        self, *, bot: Bot, session: AsyncSession, user: BotUser, locale: str
+    ) -> None:
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=enter_chat_screen(translator_for(self.core, locale)),
+        )
+
+    async def show_enter_chat_again(
+        self, *, bot: Bot, session: AsyncSession, user: BotUser, locale: str
+    ) -> None:
+        """The same prompt, after an input that named no chat the bot can see."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=enter_chat_screen(translator_for(self.core, locale), error=True),
         )
 
     async def show_linked_chat(

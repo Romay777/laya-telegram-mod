@@ -1,4 +1,8 @@
-"""The Add a chat screen (§13): the startgroup deep link of the primary path."""
+"""The Add a chat screen (§13): the startgroup deep link and the fallback entry.
+
+The primary path opens Telegram's group picker; "I added the bot already"
+takes the fallback path (§10) for a bot that was added by hand.
+"""
 
 from aiogram.types import InlineKeyboardMarkup
 
@@ -14,6 +18,7 @@ def add_chat_screen(t: GetText, url: str) -> Screen:
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [url_button(t, "menu-add-chat-open-picker", url, style=PRIMARY)],
+                [button(t, "menu-add-chat-added-already", MenuAction.ADDED_ALREADY)],
                 [button(t, "menu-back", MenuAction.HOME)],
             ]
         ),

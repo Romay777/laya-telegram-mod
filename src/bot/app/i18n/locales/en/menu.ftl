@@ -12,6 +12,9 @@ menu-how-it-works-text = Laya checks every message in your Linked Chats with an 
 
 menu-add-chat-text = Open the group picker and add me to a group as an administrator. Telegram pre-fills the two rights I need; once that is done, I will check everything and report back here.
 menu-add-chat-open-picker = 🔵 Open the group picker
+menu-add-chat-added-already = I added the bot already
+menu-enter-chat-text = Send me the chat's @username, its numeric id (-100…), or forward any message from it. I will run the same checks as with the picker and report back here.
+menu-enter-chat-invalid = I couldn't see that chat. Send me its @username, its numeric id, or forward a message from it.
 menu-link-success = ✅ {$chat} linked
 menu-chat-mode = Mode: {$mode}
 menu-chat-backend = Backend: {$backend}

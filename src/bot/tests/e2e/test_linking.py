@@ -121,8 +121,9 @@ async def test_add_to_chat_shows_the_deep_link_and_stores_a_one_hour_intent(
     assert names[3:] == ["GetMe", "EditMessageText", "AnswerCallbackQuery"]
     edit = app.session.calls_of("EditMessageText")[-1].method
     assert edit.message_id == menu_message_id  # the same self-editing Menu message
-    (open_picker,), (back,) = edit.reply_markup.inline_keyboard
+    (open_picker,), (added_already,), (back,) = edit.reply_markup.inline_keyboard
     assert open_picker.text == "🔵 Open the group picker"
+    assert added_already.callback_data == "menu:added-already:"  # the fallback path
     assert back.callback_data == "menu:home:"
 
     intent = await the_intent(app.session_maker, admin_id)

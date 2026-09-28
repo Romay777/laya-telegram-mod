@@ -8,6 +8,8 @@ One entry point per way the flow moves:
   checks, then link or report what is missing.
 - `check_again` — the Admin pressed 🔵 Check again on the failure screen.
 - `complete_pending_start` — the Linker who never started the bot just did.
+- `handle_fallback_input` — the fallback path (§10): the Admin who added the
+  bot by hand named the chat, and the same checks run with them as the Linker.
 """
 
 import asyncio
@@ -18,6 +20,7 @@ from typing import cast
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import ChatMemberUpdated
 from aiogram_i18n.cores.base import BaseCore
@@ -40,6 +43,12 @@ FALLBACK_LANGUAGE = "en"
 
 #: The FSM destiny under which a deferred Linking waits for the Linker's /start.
 LINKING_DESTINY = "linking"
+
+
+class FallbackLinkStates(StatesGroup):
+    """The FSM state of the fallback path: the bot waits for the chat's name."""
+
+    waiting_for_chat = State()
 
 
 @dataclass(frozen=True, slots=True)
