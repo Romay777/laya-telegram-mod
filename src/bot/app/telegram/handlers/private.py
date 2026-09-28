@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram_i18n import I18nContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.alerts import ALERT_MODES
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
@@ -25,7 +26,6 @@ from app.menu.callbacks import (
 )
 from app.menu.navigator import MenuNavigator
 from app.menu.screens.home import ChatSummary
-from app.menu.screens.my_alerts import ALERT_MODES
 
 
 def create_private_router() -> Router:

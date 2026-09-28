@@ -7,13 +7,11 @@ like the language screen marks its option.
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.alerts import ALERT_MODES
 from app.i18n import GetText
 from app.menu.callbacks import ChatSettingsCallback, MyAlertsCallback
 from app.menu.screen import Screen
 from app.menu.screens.buttons import PRIMARY
-
-#: The §9 alert modes, in screen order.
-ALERT_MODES = ("all", "appeals", "off")
 
 
 def my_alerts_screen(

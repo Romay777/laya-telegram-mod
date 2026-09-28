@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
-from aiogram.types import User
+from aiogram.types import ChatPermissions, User
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,7 +83,9 @@ async def lift_violation(
     # The Member returns to the chat's normal permissions, not to every
     # permission there is (§6).
     chat = await bot.get_chat(chat_id)
-    await lift_restriction(bot, chat_id, violation.user_id, permissions=chat.permissions)
+    await lift_restriction(
+        bot, chat_id, violation.user_id, permissions=chat.permissions or ChatPermissions()
+    )
 
     text = translator_for(core, locale)("alert-lifted", admin=handle_of(admin))
     for copy in await AlertRepository(session).alerts_for("violation", violation_id):
