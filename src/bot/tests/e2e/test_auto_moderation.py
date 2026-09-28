@@ -19,9 +19,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.support.backend import CLEAN
-from tests.support.harness import FIXED_NOW, TestApp, app_fixture, linked_via_deeplink
-from tests.support.telegram import member_member, member_owner
-from tests.support.updates import group_message_update, private_callback_update, user
+from tests.support.harness import FIXED_NOW, TestApp, app_fixture, auto_moderation_chat
+from tests.support.telegram import member_member
+from tests.support.updates import group_message_update, user
 
 # The Postgres container is shared, so every test gets its own people and chat.
 _admin_ids = count(1600, 10)
@@ -50,21 +50,6 @@ def chat_id() -> Iterator[int]:
 async def app(postgres_url: str) -> AsyncIterator[TestApp]:
     async with app_fixture(postgres_url) as app:
         yield app
-
-
-async def auto_moderation_chat(app: TestApp, admin_id: int, chat_id: int) -> int:
-    """Link the chat, open it, and arm Auto-moderation on the Mode screen."""
-    menu = await linked_via_deeplink(app, admin_id, chat_id)
-    app.session.script(GetChatMember, member_owner(user(admin_id)))
-    await app.feed(private_callback_update(admin_id, f"chat:{chat_id}", menu, language_code="en"))
-    await app.feed(
-        private_callback_update(admin_id, f"chat-settings:{chat_id}", menu, language_code="en")
-    )
-    await app.feed(
-        private_callback_update(admin_id, f"chat-mode:{chat_id}", menu, language_code="en")
-    )
-    app.session.calls.clear()
-    return menu
 
 
 async def the_only_check(

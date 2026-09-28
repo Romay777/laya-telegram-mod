@@ -138,3 +138,18 @@ async def linked_via_deeplink(
     await app.feed(my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title=title))
     app.session.calls.clear()
     return menu_message_id
+
+
+async def auto_moderation_chat(app: TestApp, admin_id: int, chat_id: int) -> int:
+    """Link the chat, open it, and arm Auto-moderation on the Mode screen (§13)."""
+    menu = await linked_via_deeplink(app, admin_id, chat_id)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(private_callback_update(admin_id, f"chat:{chat_id}", menu, language_code="en"))
+    await app.feed(
+        private_callback_update(admin_id, f"chat-settings:{chat_id}", menu, language_code="en")
+    )
+    await app.feed(
+        private_callback_update(admin_id, f"chat-mode:{chat_id}", menu, language_code="en")
+    )
+    app.session.calls.clear()
+    return menu

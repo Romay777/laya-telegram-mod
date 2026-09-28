@@ -13,14 +13,9 @@ from aiogram.methods import GetChatMember
 from app.db.models import Chat
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tests.support.harness import TestApp, app_fixture
+from tests.support.harness import TestApp, app_fixture, linked_via_deeplink, started_admin
 from tests.support.telegram import member_member, member_owner
-from tests.support.updates import (
-    my_chat_member_update,
-    private_callback_update,
-    start_update,
-    user,
-)
+from tests.support.updates import private_callback_update, user
 
 # The Postgres container is shared, so every test gets its own Admin and chat.
 _admin_ids = count(1500, 10)
@@ -46,31 +41,6 @@ def chat_id() -> Iterator[int]:
 async def app(postgres_url: str) -> AsyncIterator[TestApp]:
     async with app_fixture(postgres_url) as app:
         yield app
-
-
-async def started_admin(app: TestApp, admin_id: int) -> int:
-    """/start with the language picked; returns the Admin's Menu message id."""
-    await app.feed(start_update(admin_id, "en"))
-    menu_message_id = app.session.calls_of("SendMessage")[0].result.message_id
-    await app.feed(
-        private_callback_update(
-            admin_id, "menu:set-language:en", menu_message_id, language_code="en"
-        )
-    )
-    return menu_message_id
-
-
-async def linked_via_deeplink(
-    app: TestApp, admin_id: int, chat_id: int, title: str = "My Chat"
-) -> int:
-    menu_message_id = await started_admin(app, admin_id)
-    await app.feed(
-        private_callback_update(admin_id, "menu:add-to-chat:", menu_message_id, language_code="en")
-    )
-    app.session.script(GetChatMember, member_owner(user(admin_id)))
-    await app.feed(my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title=title))
-    app.session.calls.clear()
-    return menu_message_id
 
 
 async def stored_chat(session_maker: async_sessionmaker[AsyncSession], chat_id: int) -> Chat | None:

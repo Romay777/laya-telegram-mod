@@ -7,15 +7,13 @@ every check writes a `message_check` row without text, and only flagged
 messages keep theirs, in `flagged_message` until the retention passes.
 """
 
-import contextlib
 import time
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import ChatPermissions, Message
+from aiogram.types import Message
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +26,7 @@ from app.db.repositories.moderation import ModerationRepository
 from app.domain.decision import decide
 from app.linking.admin_cache import AdminCache
 from app.moderation import signals
+from app.moderation.actions import delete_message, restrict_member
 from app.notices.sender import removal_time, send_notice
 
 #: The backend this pipeline checks with: the local Laya (§5). Jev, the
@@ -143,7 +142,7 @@ class ModerationPipeline:
         )
 
         # §6 order of actions: delete → record → restrict → notice.
-        await self._delete(bot, message)
+        await delete_message(bot, message)
         violation = await repo.record_violation(
             chat=chat,
             user_id=sender.id,
@@ -151,7 +150,9 @@ class ModerationPipeline:
             category=decision.category,
             now=now,
         )
-        await self._restrict(bot, chat.chat_id, sender.id, violation.restricted_until)
+        await restrict_member(
+            bot, chat.chat_id, sender.id, restricted_until=violation.restricted_until
+        )
         notice = await send_notice(
             bot,
             self._core,
@@ -184,7 +185,7 @@ class ModerationPipeline:
         confidence: float | None = None,
         probabilities: Probabilities | None = None,
         latency_ms: int | None = None,
-    ):
+    ) -> Any:
         """One `message_check` row: the Verdict and probabilities, no text (§12)."""
         return await repo.record_check(
             chat_id=chat.chat_id,
@@ -205,37 +206,3 @@ class ModerationPipeline:
         """The chat's Sensitivity preset for its backend (§3; per-Category
         overrides are reserved for later)."""
         return self._thresholds[chat.backend][chat.sensitivity].violation
-
-    async def _delete(self, bot: Bot, message: Message) -> None:
-        """Delete the message; if it is already gone, the pipeline continues (§6)."""
-        with contextlib.suppress(TelegramBadRequest):
-            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-
-    async def _restrict(
-        self, bot: Bot, chat_id: int, user_id: int, restricted_until: datetime | None
-    ) -> None:
-        """Restrict with every `can_*` off; forever is `until_date = 0` (§6)."""
-        await bot.restrict_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            permissions=ChatPermissions(
-                can_send_messages=False,
-                can_send_audios=False,
-                can_send_documents=False,
-                can_send_photos=False,
-                can_send_videos=False,
-                can_send_video_notes=False,
-                can_send_voice_notes=False,
-                can_send_polls=False,
-                can_send_other_messages=False,
-                can_add_web_page_previews=False,
-                can_react_to_messages=False,
-                can_edit_tag=False,
-                can_change_info=False,
-                can_invite_users=False,
-                can_pin_messages=False,
-                can_manage_topics=False,
-            ),
-            until_date=int(restricted_until.timestamp()) if restricted_until else 0,
-            use_independent_chat_permissions=True,
-        )
