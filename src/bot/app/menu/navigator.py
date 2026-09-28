@@ -28,6 +28,7 @@ from app.menu.screens import (
     link_expired_screen,
     link_failed_screen,
     linked_chat_screen,
+    my_alerts_screen,
     settings_screen,
 )
 from app.menu.screens.home import ChatSummary
@@ -118,6 +119,30 @@ class MenuNavigator:
                 chat_title,
                 chat_id=chat_id,
                 mode=mode,
+            ),
+        )
+
+    async def show_my_alerts(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        alert_mode: str,
+        locale: str,
+    ) -> None:
+        """My alerts of one chat (§9): All, Appeals only, or Off."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=my_alerts_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                alert_mode=alert_mode,
             ),
         )
 

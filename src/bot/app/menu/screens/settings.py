@@ -8,7 +8,7 @@ tickets and are not shown before they exist.
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.i18n import GetText
-from app.menu.callbacks import ChatCallback, ChatModeCallback
+from app.menu.callbacks import ChatCallback, ChatModeCallback, MyAlertsCallback
 from app.menu.screen import Screen
 from app.menu.screens.buttons import SUCCESS
 from app.menu.screens.chat import mode_line
@@ -27,6 +27,7 @@ def settings_screen(
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [mode_button(t, chat_id=chat_id, mode=mode)],
+                [my_alerts_button(t, chat_id=chat_id)],
                 [
                     InlineKeyboardButton(
                         text=t("menu-back"),
@@ -35,6 +36,14 @@ def settings_screen(
                 ],
             ]
         ),
+    )
+
+
+def my_alerts_button(t: GetText, *, chat_id: int) -> InlineKeyboardButton:
+    """My alerts (§13): each Admin picks their own alert mode per chat (§9)."""
+    return InlineKeyboardButton(
+        text=t("menu-chat-my-alerts"),
+        callback_data=MyAlertsCallback(chat_id=chat_id).pack(),
     )
 
 

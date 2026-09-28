@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
+from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.i18n import SUPPORTED_LANGUAGES, translator_for
 from app.linking.admin_cache import AdminCache
 from app.linking.service import FallbackLinkStates, LinkingService
@@ -20,9 +21,11 @@ from app.menu.callbacks import (
     ChatSettingsCallback,
     MenuAction,
     MenuCallback,
+    MyAlertsCallback,
 )
 from app.menu.navigator import MenuNavigator
 from app.menu.screens.home import ChatSummary
+from app.menu.screens.my_alerts import ALERT_MODES
 
 
 def create_private_router() -> Router:
@@ -229,6 +232,43 @@ def create_private_router() -> Router:
             chat_id=chat.chat_id,
             chat_title=chat.title,
             mode=chat.mode,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(MyAlertsCallback.filter(), F.message.chat.type == "private")
+    async def my_alerts(
+        callback: CallbackQuery,
+        callback_data: MyAlertsCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """My alerts (§9): pick what this Admin gets for this chat."""
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        subs = AdminSubscriptionRepository(session)
+        if callback_data.mode in ALERT_MODES:
+            await subs.set_mode(
+                chat.chat_id, user_id=bot_user.user_id, alert_mode=callback_data.mode
+            )  # noqa: E501 — the mode is validated just above
+        await navigator.show_my_alerts(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            alert_mode=await subs.get_mode(chat.chat_id, bot_user.user_id),
             locale=i18n.locale,
         )
         await callback.answer()

@@ -60,6 +60,17 @@ class ChatModeCallback(CallbackData, prefix="chat-mode"):
     chat_id: int
 
 
+class MyAlertsCallback(CallbackData, prefix="chat-alerts"):
+    """The My alerts screen (§9, §13) of one chat.
+
+    `mode` is None when the screen is merely opened; otherwise it names the
+    alert mode the Admin just picked: `all`, `appeals` or `off`.
+    """
+
+    chat_id: int
+    mode: str | None = None
+
+
 class LiftRestrictionCallback(CallbackData, prefix="lift"):
     """🟢 Lift restriction on a Violation's Admin Alert copy (§9).
 
