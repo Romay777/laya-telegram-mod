@@ -40,9 +40,23 @@ def decide(
     violation_threshold: float,
     suspicion_threshold: float,
     mode: str,
+    enabled_categories: tuple[str, ...] | None = None,
 ) -> Decision:
-    """The argmax label, sorted into a zone by the mode and the thresholds."""
-    category = max(probabilities, key=lambda label: probabilities[label])
+    """The argmax label, sorted into a zone by the mode and the thresholds.
+
+    Disabled Categories are ignored when the Verdict is picked (§4 step 7):
+    the highest-probability enabled label counts, and "clean" when nothing
+    enabled is left. `None` means every label counts, as before.
+    """
+    if enabled_categories is None:
+        category = max(probabilities, key=lambda label: probabilities[label])
+    else:
+        enabled = set(enabled_categories) | {CLEAN}
+        category = max(
+            (label for label in probabilities if label in enabled),
+            key=lambda label: probabilities[label],
+            default=CLEAN,
+        )
     confidence = probabilities[category]
     if category != CLEAN and confidence >= suspicion_threshold:
         # One zone is flagged in both modes; only Auto-moderation splits it

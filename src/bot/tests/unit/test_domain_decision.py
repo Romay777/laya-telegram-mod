@@ -141,3 +141,76 @@ def test_below_the_suspicion_threshold_nothing_happens_in_either_mode() -> None:
         )
 
         assert decision.outcome == "clean"
+
+
+def test_a_disabled_category_is_ignored_and_the_next_enabled_label_is_used() -> None:
+    # Advertising wins the raw argmax, but the chat has switched it off.
+    probabilities = {"spam": 0.10, "ads": 0.80, "insult": 0.70, "clean": 0.05}
+
+    decision = decide(
+        probabilities=probabilities,
+        violation_threshold=VIOLATION,
+        suspicion_threshold=SUSPICION,
+        mode=MODE_AUTO,
+        enabled_categories=("spam", "insult"),
+    )
+
+    assert decision.category == "insult"
+    assert decision.confidence == pytest.approx(0.70)
+    assert decision.outcome == "suspicion"  # 0.70 sits in the middle band
+
+
+def test_a_disabled_category_above_the_threshold_produces_no_violation() -> None:
+    # Advertising at 0.97 would have violated; the next enabled label is far below.
+    probabilities = {"spam": 0.02, "ads": 0.97, "insult": 0.005, "clean": 0.005}
+
+    decision = decide(
+        probabilities=probabilities,
+        violation_threshold=VIOLATION,
+        suspicion_threshold=SUSPICION,
+        mode=MODE_AUTO,
+        enabled_categories=("spam", "insult"),
+    )
+
+    assert decision.outcome == "clean"
+    assert decision.category == "spam"
+
+
+def test_with_every_category_disabled_the_verdict_is_clean() -> None:
+    decision = decide(
+        probabilities={"spam": 0.90, "ads": 0.05, "insult": 0.04, "clean": 0.01},
+        violation_threshold=VIOLATION,
+        suspicion_threshold=SUSPICION,
+        mode=MODE_AUTO,
+        enabled_categories=(),
+    )
+
+    assert decision.outcome == "clean"
+    assert decision.category == CLEAN
+
+
+def test_clean_counts_even_when_it_is_not_the_raw_argmax() -> None:
+    # Only insults are checked, and clean still beats them.
+    probabilities = {"spam": 0.30, "ads": 0.10, "insult": 0.05, "clean": 0.55}
+
+    decision = decide(
+        probabilities=probabilities,
+        violation_threshold=VIOLATION,
+        suspicion_threshold=SUSPICION,
+        mode=MODE_AUTO,
+        enabled_categories=("insult",),
+    )
+
+    assert decision.outcome == "clean"
+    assert decision.category == CLEAN
+
+
+def test_without_the_argument_every_label_counts_as_before() -> None:
+    decision = decide(
+        probabilities={"spam": 0.10, "ads": 0.80, "insult": 0.05, "clean": 0.05},
+        violation_threshold=VIOLATION,
+        suspicion_threshold=SUSPICION,
+        mode=MODE_AUTO,
+    )
+
+    assert decision.category == "ads"  # the default stays: the full argmax
