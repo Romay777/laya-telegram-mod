@@ -17,25 +17,37 @@ def utf16_len(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+def message_link(chat_id: int, message_id: int) -> str:
+    """The t.me link to a message in a private supergroup (§9).
+
+    Telegram's public links drop the `-100` supergroup prefix from the
+    chat id: `-1004501234567` becomes `t.me/c/4501234567/77`.
+    """
+    return f"https://t.me/c/{str(chat_id).removeprefix('-100')}/{message_id}"
+
+
 def _quoted_alert(
     t: GetText,
     header: str,
     flagged_text: str | None,
     flagged_entities: list[dict[str, Any]] | None,
+    header_entities: list[dict[str, Any]] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Append the deleted message as a `blockquote` quote, entities kept (§9).
+    """Append the flagged message as a `blockquote` quote, entities kept (§9).
 
     The stored entities shift past the header by UTF-16 code units, the
     offsets Telegram counts. When the stored text has been purged, the alert
-    says so instead (§8).
+    says so instead (§8) — but the header's own entities, such as the
+    Suspicion's message link, survive either way.
     """
+    base = list(header_entities or [])
     if flagged_text is None:
-        return f"{header}\n\n{t('alert-text-not-stored')}", []
+        return f"{header}\n\n{t('alert-text-not-stored')}", base
 
     shift = utf16_len(header) + 2  # the blank line between header and quote
     shifted = [{**entity, "offset": entity["offset"] + shift} for entity in flagged_entities]
     quote = {"type": "blockquote", "offset": shift, "length": utf16_len(flagged_text)}
-    return f"{header}\n\n{flagged_text}", [*shifted, quote]
+    return f"{header}\n\n{flagged_text}", [*base, *shifted, quote]
 
 
 def _facts_header(
@@ -83,6 +95,41 @@ def render_violation_alert(
         step_seconds=step_seconds,
     )
     return _quoted_alert(t, header, flagged_text, flagged_entities)
+
+
+def render_suspicion_alert(
+    t: GetText,
+    *,
+    chat_title: str,
+    member_name: str,
+    category: str,
+    confidence: float,
+    url: str,
+    flagged_text: str | None,
+    flagged_entities: list[dict[str, Any]] | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """The Suspicion alert (§9): the facts, a link to the message, the quote.
+
+    The message stays in the chat, so the link points Admins at it; it is
+    made clickable with a `text_link` entity over the URL line itself.
+    """
+    fact_lines = [
+        t("alert-suspicion-header", chat=chat_title),
+        t("alert-violation-member", member=member_name),
+        t(
+            "alert-violation-verdict",
+            category=t(f"category-{category}"),
+            confidence=round(confidence * 100),
+        ),
+    ]
+    header = "\n".join([*fact_lines, url])
+    link = {
+        "type": "text_link",
+        "offset": utf16_len("\n".join(fact_lines)) + 1,  # past the newline
+        "length": utf16_len(url),
+        "url": url,
+    }
+    return _quoted_alert(t, header, flagged_text, flagged_entities, header_entities=[link])
 
 
 def render_appeal_alert(
