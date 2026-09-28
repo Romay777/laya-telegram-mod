@@ -119,3 +119,29 @@ class ChatRepository:
             return
         chat.chat_language = chat_language
         await self.session.flush()
+
+    async def set_ladder(self, chat_id: int, ladder: tuple[int, ...]) -> None:
+        """The chat's Penalty Ladder (§6, §12): 1–10 Steps in seconds, 0 = forever.
+
+        Only the `chat` row changes: existing Violations keep the Step,
+        Restriction and Expiry they were recorded with, and the new ladder
+        applies from the next Violation.
+        """
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.ladder = list(ladder)
+        await self.session.flush()
+
+    async def set_expiry(self, chat_id: int, expiry_seconds: int | None) -> None:
+        """The chat's Expiry period (§6, §12): None means never.
+
+        The period counts per Violation from when it was recorded; changing
+        it never touches the Violations already in the table, and it never
+        lifts a Restriction that is in place.
+        """
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.expiry_seconds = expiry_seconds
+        await self.session.flush()
