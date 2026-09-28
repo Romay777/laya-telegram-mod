@@ -477,7 +477,9 @@ async def test_an_appeal_after_the_purge_says_the_text_is_no_longer_stored(
         flagged.purge_at = FIXED_NOW + timedelta(seconds=1)
         await db.commit()
     app.clock.advance(timedelta(minutes=1))
-    await Scheduler(bot=app.bot, session_maker=app.session_maker, clock=app.clock).run_once()
+    await Scheduler(
+        bot=app.bot, session_maker=app.session_maker, clock=app.clock, core=app.i18n.core
+    ).run_once()
     app.session.calls.clear()
 
     await appeal_press(app, chat_id, member_id, violation.id, notice.result.message_id)

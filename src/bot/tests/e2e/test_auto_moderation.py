@@ -147,7 +147,9 @@ async def test_a_spam_message_runs_the_whole_violation_sequence(
     # The notice removes itself at delete_at, through the scheduler loop (§7, §11).
     app.clock.advance(timedelta(hours=1))
     app.session.calls.clear()
-    await Scheduler(bot=app.bot, session_maker=app.session_maker, clock=app.clock).run_once()
+    await Scheduler(
+        bot=app.bot, session_maker=app.session_maker, clock=app.clock, core=app.i18n.core
+    ).run_once()
 
     (notice_delete,) = app.session.calls_of("DeleteMessage")
     assert (notice_delete.method.chat_id, notice_delete.method.message_id) == (
@@ -161,7 +163,9 @@ async def test_a_spam_message_runs_the_whole_violation_sequence(
     # The flagged text stays until its own retention passes (§11).
     assert isinstance(flagged.text, str)
     app.clock.advance(timedelta(days=30))
-    await Scheduler(bot=app.bot, session_maker=app.session_maker, clock=app.clock).run_once()
+    await Scheduler(
+        bot=app.bot, session_maker=app.session_maker, clock=app.clock, core=app.i18n.core
+    ).run_once()
     purged = await fresh(app.session_maker, FlaggedMessage, check.id)
     assert isinstance(purged, FlaggedMessage)
     assert purged.text is None

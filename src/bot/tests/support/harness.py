@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from aiogram import Bot, Dispatcher
 from aiogram.methods import GetChatMember
+from aiogram_i18n import I18nMiddleware
 from app.clock import FakeClock
 from app.main import build_dispatcher, build_i18n_middleware
 from sqlalchemy.ext.asyncio import (
@@ -47,6 +48,7 @@ class TestApp:
     engine: AsyncEngine
     clock: FakeClock
     backend: FakeBackend
+    i18n: I18nMiddleware
     _update_id: int = 0
 
     async def feed(self, update: Update) -> None:
@@ -98,6 +100,7 @@ async def build_app(
         engine=engine,
         clock=clock,
         backend=classifier,
+        i18n=i18n,
     )
 
 

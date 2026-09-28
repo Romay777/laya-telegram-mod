@@ -60,6 +60,24 @@ class ChatModeCallback(CallbackData, prefix="chat-mode"):
     chat_id: int
 
 
+class EnableAutoCallback(CallbackData, prefix="enable-auto"):
+    """🟢 Enable auto-moderation (§13): after Linking, or from the summary.
+
+    Carries the `chat_id` so the handler can re-check Admin access (§13).
+    """
+
+    chat_id: int
+
+
+class ObserveCallback(CallbackData, prefix="observe"):
+    """🔵 Observe for 2 days first (§13): schedules the 48-hour summary.
+
+    Carries the `chat_id` so the handler can re-check Admin access (§13).
+    """
+
+    chat_id: int
+
+
 class MyAlertsCallback(CallbackData, prefix="chat-alerts"):
     """The My alerts screen (§9, §13) of one chat.
 

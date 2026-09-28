@@ -13,6 +13,7 @@ import pytest
 from aiogram.methods import GetChatMember
 from app.db.models import ChatNotice, FlaggedMessage, MessageCheck, Suspicion, Violation
 from app.menu.callbacks import SuspicionDecideCallback
+from app.scheduler import Scheduler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -383,3 +384,87 @@ async def test_punishing_a_48_hour_old_message_skips_the_deletion(
     )
     (violation,) = await the_violations(app.session_maker)
     assert violation.source == "admin"  # the Violation stands either way
+
+
+# --- The scheduler auto-closes what nobody decided (§11) ---------------------
+
+
+async def test_pending_suspicions_auto_close_as_expired(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    await pending_suspicion_alerts(app, admin_id, member_id, chat_id, message_id=87)
+    app.clock.advance(timedelta(hours=24))  # suspicions.auto_close_h
+
+    await Scheduler(
+        bot=app.bot, session_maker=app.session_maker, clock=app.clock, core=app.i18n.core
+    ).run_once()
+
+    # Nothing is sent to anybody: the Suspicion just closes (§11).
+    assert app.session.calls == []
+    decided = await the_suspicion(app.session_maker)
+    assert decided.status == "expired"
+    assert decided.decided_at == FIXED_NOW + timedelta(hours=24)
+    assert decided.decided_by is None  # nobody decided
+
+
+async def test_a_decided_suspicion_is_never_auto_closed(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    first_copy, _second_copy, _second_id = await pending_suspicion_alerts(
+        app, admin_id, member_id, chat_id, message_id=88
+    )
+    suspicion = await the_suspicion(app.session_maker)
+    app.session.script(GetChatMember, member_member(user(member_id)))
+    await app.feed(
+        private_callback_update(
+            admin_id,
+            SuspicionDecideCallback(
+                chat_id=chat_id, suspicion_id=suspicion.id, punish=False
+            ).pack(),
+            first_copy,
+            language_code="en",
+            username="alpha",
+        )
+    )
+    app.clock.advance(timedelta(days=3))
+
+    await Scheduler(
+        bot=app.bot, session_maker=app.session_maker, clock=app.clock, core=app.i18n.core
+    ).run_once()
+
+    decided = await the_suspicion(app.session_maker)
+    assert decided.status == "dismissed"  # the Admin's decision stands
+    assert decided.decided_at == FIXED_NOW  # untouched by the scheduler
+
+
+async def test_punishing_an_expired_suspicion_only_gets_a_toast(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    first_copy, _second_copy, _second_id = await pending_suspicion_alerts(
+        app, admin_id, member_id, chat_id, message_id=89
+    )
+    suspicion = await the_suspicion(app.session_maker)
+    app.clock.advance(timedelta(hours=24))
+    await Scheduler(
+        bot=app.bot, session_maker=app.session_maker, clock=app.clock, core=app.i18n.core
+    ).run_once()
+    app.session.calls.clear()
+    app.session.script(GetChatMember, member_owner(user(admin_id, username="alpha")))
+
+    await app.feed(
+        private_callback_update(
+            admin_id,
+            SuspicionDecideCallback(chat_id=chat_id, suspicion_id=suspicion.id, punish=True).pack(),
+            first_copy,
+            language_code="en",
+            username="alpha",
+        )
+    )
+
+    # The alert's buttons are dead: a toast explains, nothing happens (§9).
+    assert app.session.call_names() == ["GetChatMember", "AnswerCallbackQuery"]
+    (answer,) = app.session.calls_of("AnswerCallbackQuery")
+    assert answer.method.text == "This suspicion has already expired."
+    decided = await the_suspicion(app.session_maker)
+    assert decided.status == "expired"
+    assert await the_violations(app.session_maker) == []

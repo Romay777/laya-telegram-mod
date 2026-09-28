@@ -142,7 +142,14 @@ async def run() -> None:
     bot = build_bot(settings.bot_token)
     # §11: one loop picks up every due job; Telegram lifts expired
     # Restrictions itself, so no job is needed for that.
-    scheduler = Scheduler(bot=bot, session_maker=session_maker, clock=clock)
+    scheduler = Scheduler(
+        bot=bot,
+        session_maker=session_maker,
+        clock=clock,
+        core=i18n.core,
+        auto_close_h=settings.suspicions.auto_close_h,
+        summary_after_h=settings.observation.summary_after_h,
+    )
     scheduler_task = asyncio.create_task(scheduler.run_forever())
     logger.info("starting polling with allowed_updates=%s", ALLOWED_UPDATES)
     try:
