@@ -25,6 +25,7 @@ from app.classifiers.router import CheckSkip, ClassifierBackend
 from app.classifiers.spec import LAYA_MODEL, SPEC_VERSION
 from app.clock import Clock
 from app.db.models import Chat
+from app.db.repositories.chats import ChatRepository
 from app.db.repositories.moderation import ModerationRepository
 from app.db.repositories.suspicions import SuspicionRepository
 from app.domain.decision import decide
@@ -132,6 +133,7 @@ class ModerationPipeline:
             violation_threshold=self._violation_threshold(chat),
             suspicion_threshold=self._suspicion_threshold(chat),
             mode=chat.mode,
+            enabled_categories=await ChatRepository(session).enabled_categories(chat.chat_id),
         )
         check = await self._record(
             repo,

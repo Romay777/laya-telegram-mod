@@ -2,10 +2,14 @@
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.classifiers.spec import LABELS
 from app.db.models import Category, Chat, ChatCategory
+
+#: The toggleable Categories of §13: every question-spec label but "clean".
+CATEGORY_CODES = tuple(code for code in LABELS if code != "clean")
 
 
 class ChatRepository:
@@ -77,3 +81,41 @@ class ChatRepository:
             self.session.add(ChatCategory(chat_id=chat_id, category_code=code, enabled=True))
         await self.session.flush()
         return chat
+
+    async def enabled_categories(self, chat_id: int) -> tuple[str, ...]:
+        """The Category codes the chat checks with, in question-spec order (§4).
+
+        A Category with no row counts as enabled: the §12 default is all on,
+        and a chat linked before a later builtin Category was seeded keeps
+        working.
+        """
+        rows = await self.session.scalars(
+            select(ChatCategory).where(ChatCategory.chat_id == chat_id)
+        )
+        enabled = {row.category_code: row.enabled for row in rows}
+        return tuple(code for code in CATEGORY_CODES if code not in enabled or enabled[code])
+
+    async def set_category_enabled(self, chat_id: int, code: str, *, enabled: bool) -> None:
+        """Turn one Category on or off for the chat (§13)."""
+        await self.session.execute(
+            update(ChatCategory)
+            .where(ChatCategory.chat_id == chat_id, ChatCategory.category_code == code)
+            .values(enabled=enabled)
+        )
+        await self.session.flush()
+
+    async def set_sensitivity(self, chat_id: int, sensitivity: str) -> None:
+        """The Sensitivity preset the chat's thresholds come from (§3, §13)."""
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.sensitivity = sensitivity
+        await self.session.flush()
+
+    async def set_chat_language(self, chat_id: int, chat_language: str) -> None:
+        """The language of the chat's Notices, buttons and Member toasts (§15, §13)."""
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.chat_language = chat_language
+        await self.session.flush()

@@ -147,3 +147,95 @@ async def test_chat_rows_exist_but_are_not_double_created(
 
     assert isinstance(found, Chat)
     assert found.title == "My Chat"
+
+
+async def test_enabled_categories_lists_every_builtin_in_spec_order_by_default(
+    db_session: AsyncSession,
+) -> None:
+    chat_id = next(_chat_ids)
+    await ChatRepository(db_session).create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=77,
+        linked_at=FakeClock().now(),
+        chat_language="en",
+    )
+
+    assert await ChatRepository(db_session).enabled_categories(chat_id) == (
+        "spam",
+        "ads",
+        "insult",
+    )
+
+
+async def test_disabling_a_category_takes_it_out_of_enabled_categories(
+    db_session: AsyncSession,
+) -> None:
+    chat_id = next(_chat_ids)
+    repo = ChatRepository(db_session)
+    await repo.create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=77,
+        linked_at=FakeClock().now(),
+        chat_language="en",
+    )
+
+    await repo.set_category_enabled(chat_id, "ads", enabled=False)
+
+    assert await repo.enabled_categories(chat_id) == ("spam", "insult")
+    row = await db_session.get(ChatCategory, (chat_id, "ads"))
+    assert row is not None and row.enabled is False  # the toggle is stored, not removed
+    other = await db_session.get(ChatCategory, (chat_id, "spam"))
+    assert other is not None and other.enabled is True
+
+
+async def test_re_enabling_a_category_puts_it_back(db_session: AsyncSession) -> None:
+    chat_id = next(_chat_ids)
+    repo = ChatRepository(db_session)
+    await repo.create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=77,
+        linked_at=FakeClock().now(),
+        chat_language="en",
+    )
+    await repo.set_category_enabled(chat_id, "insult", enabled=False)
+
+    await repo.set_category_enabled(chat_id, "insult", enabled=True)
+
+    assert await repo.enabled_categories(chat_id) == ("spam", "ads", "insult")
+
+
+async def test_set_sensitivity_stores_the_preset_choice(db_session: AsyncSession) -> None:
+    chat_id = next(_chat_ids)
+    repo = ChatRepository(db_session)
+    await repo.create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=77,
+        linked_at=FakeClock().now(),
+        chat_language="en",
+    )
+
+    await repo.set_sensitivity(chat_id, "strict")
+
+    chat = await repo.get(chat_id)
+    assert chat is not None and chat.sensitivity == "strict"
+
+
+async def test_set_chat_language_stores_the_chat_language(db_session: AsyncSession) -> None:
+    chat_id = next(_chat_ids)
+    repo = ChatRepository(db_session)
+    await repo.create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=77,
+        linked_at=FakeClock().now(),
+        chat_language="en",
+    )
+
+    await repo.set_chat_language(chat_id, "ru")
+
+    chat = await repo.get(chat_id)
+    assert chat is not None and chat.chat_language == "ru"
