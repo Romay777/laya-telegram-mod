@@ -7,6 +7,7 @@ navigator sends a new one and removes the old where possible.
 """
 
 import contextlib
+from collections.abc import Sequence
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
@@ -19,6 +20,7 @@ from app.i18n import translator_for
 from app.menu.screen import Screen
 from app.menu.screens import (
     add_chat_screen,
+    chat_screen,
     enter_chat_screen,
     home_screen,
     how_it_works_screen,
@@ -27,6 +29,7 @@ from app.menu.screens import (
     link_failed_screen,
     linked_chat_screen,
 )
+from app.menu.screens.home import ChatSummary
 
 
 class MenuNavigator:
@@ -51,13 +54,44 @@ class MenuNavigator:
         )
 
     async def show_home(
-        self, *, bot: Bot, session: AsyncSession, user: BotUser, locale: str
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        locale: str,
+        chats: Sequence[ChatSummary] = (),
     ) -> None:
         await self._show(
             bot=bot,
             session=session,
             user=user,
-            screen=home_screen(translator_for(self.core, locale)),
+            screen=home_screen(translator_for(self.core, locale), chats),
+        )
+
+    async def show_chat(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_title: str | None,
+        mode: str,
+        backend: str,
+        sensitivity: str,
+        locale: str,
+    ) -> None:
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=chat_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                mode=mode,
+                backend=backend,
+                sensitivity=sensitivity,
+            ),
         )
 
     async def show_how_it_works(

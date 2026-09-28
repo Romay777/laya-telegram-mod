@@ -437,7 +437,10 @@ async def test_linking_completes_when_the_prompted_linker_presses_start(
     quick_app.session.script(GetChatMember, member_owner(user(admin_id)))
     await quick_app.feed(start_update(admin_id, "en"))
 
-    assert quick_app.session.call_names() == [
+    # The group prompt's self-deletion (shrunk to 50 ms) lands whenever the
+    # loop gets a chance; it is noise here.
+    names = [name for name in quick_app.session.call_names() if name != "DeleteMessage"]
+    assert names == [
         "GetChat",
         "GetChatMember",
         "GetChatMember",
@@ -457,6 +460,6 @@ async def test_linking_completes_when_the_prompted_linker_presses_start(
     # The pending link was consumed: another /start is the ordinary flow.
     quick_app.session.calls.clear()
     await quick_app.feed(start_update(admin_id, "en"))
-    names = quick_app.session.call_names()
+    names = [name for name in quick_app.session.call_names() if name != "DeleteMessage"]
     assert "GetChat" not in names  # nothing left to re-check
     assert names == ["EditMessageText"]  # the ordinary /start: the Menu is re-edited

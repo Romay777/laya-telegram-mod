@@ -15,6 +15,17 @@ class ChatRepository:
     async def get(self, chat_id: int) -> Chat | None:
         return await self.session.get(Chat, chat_id)
 
+    async def list_linked(self) -> list[Chat]:
+        """Every Linked Chat the Home screen may offer (§13): everything not removed.
+
+        Suspended chats stay listed — they are managed back to active, not
+        re-linked. Ordered by when each chat was linked, then by id.
+        """
+        rows = await self.session.scalars(
+            select(Chat).where(Chat.status != "removed").order_by(Chat.linked_at, Chat.chat_id)
+        )
+        return list(rows)
+
     async def create_linked(
         self,
         *,

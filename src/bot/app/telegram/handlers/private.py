@@ -10,10 +10,13 @@ from aiogram_i18n import I18nContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser
-from app.i18n import SUPPORTED_LANGUAGES
+from app.db.repositories.chats import ChatRepository
+from app.i18n import SUPPORTED_LANGUAGES, translator_for
+from app.linking.admin_cache import AdminCache
 from app.linking.service import FallbackLinkStates, LinkingService
-from app.menu.callbacks import MenuAction, MenuCallback
+from app.menu.callbacks import ChatCallback, MenuAction, MenuCallback
 from app.menu.navigator import MenuNavigator
+from app.menu.screens.home import ChatSummary
 
 
 def create_private_router() -> Router:
@@ -27,6 +30,7 @@ def create_private_router() -> Router:
         bot_user: BotUser,
         navigator: MenuNavigator,
         linking: LinkingService,
+        admin_cache: AdminCache,
         i18n: I18nContext,
         state: FSMContext,
     ) -> None:
@@ -47,7 +51,13 @@ def create_private_router() -> Router:
                 locale=i18n.locale,
             )
         else:
-            await navigator.show_home(bot=bot, session=session, user=bot_user, locale=i18n.locale)
+            await navigator.show_home(
+                bot=bot,
+                session=session,
+                user=bot_user,
+                locale=i18n.locale,
+                chats=await _administered_chats(bot, admin_cache, session, bot_user.user_id),
+            )
 
     @router.callback_query(MenuCallback.filter(), F.message.chat.type == "private")
     async def menu(
@@ -58,6 +68,7 @@ def create_private_router() -> Router:
         bot_user: BotUser,
         navigator: MenuNavigator,
         linking: LinkingService,
+        admin_cache: AdminCache,
         i18n: I18nContext,
         state: FSMContext,
     ) -> None:
@@ -95,7 +106,13 @@ def create_private_router() -> Router:
 
         match callback_data.action:
             case MenuAction.SET_LANGUAGE | MenuAction.HOME:
-                await navigator.show_home(bot=bot, session=session, user=bot_user, locale=locale)
+                await navigator.show_home(
+                    bot=bot,
+                    session=session,
+                    user=bot_user,
+                    locale=locale,
+                    chats=await _administered_chats(bot, admin_cache, session, bot_user.user_id),
+                )
             case MenuAction.LANGUAGE_SCREEN:
                 await navigator.show_language_screen(
                     bot=bot,
@@ -109,6 +126,47 @@ def create_private_router() -> Router:
                     bot=bot, session=session, user=bot_user, locale=locale
                 )
 
+        await callback.answer()
+
+    @router.callback_query(ChatCallback.filter(), F.message.chat.type == "private")
+    async def open_chat(
+        callback: CallbackQuery,
+        callback_data: ChatCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        # Every chat-scoped callback re-checks Admin access (§10, §13).
+        chat = await ChatRepository(session).get(callback_data.chat_id)
+        if chat is None or not await admin_cache.is_admin(bot, chat.chat_id, callback.from_user.id):
+            t = translator_for(i18n.core, i18n.locale)
+            await callback.answer(text=t("menu-chat-access-lost"), show_alert=False)
+            await navigator.show_home(
+                bot=bot,
+                session=session,
+                user=bot_user,
+                locale=i18n.locale,
+                chats=await _administered_chats(bot, admin_cache, session, callback.from_user.id),
+            )
+            return
+
+        await navigator.show_chat(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_title=chat.title,
+            mode=chat.mode,
+            backend=chat.backend,
+            sensitivity=chat.sensitivity,
+            locale=i18n.locale,
+        )
         await callback.answer()
 
     @router.message(StateFilter(FallbackLinkStates.waiting_for_chat), F.chat.type == "private")
@@ -134,3 +192,19 @@ def create_private_router() -> Router:
         )
 
     return router
+
+
+async def _administered_chats(
+    bot: Bot, admin_cache: AdminCache, session: AsyncSession, user_id: int
+) -> list[ChatSummary]:
+    """The Linked Chats Home lists: those the user currently administers (§10).
+
+    Admin status is a Telegram fact, taken from the cache over `getChatMember`;
+    a chat whose admin the user no longer is drops off the screen.
+    """
+    chats = await ChatRepository(session).list_linked()
+    return [
+        ChatSummary(chat_id=chat.chat_id, title=chat.title)
+        for chat in chats
+        if await admin_cache.is_admin(bot, chat.chat_id, user_id)
+    ]

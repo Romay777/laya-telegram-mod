@@ -17,6 +17,7 @@ from app.clock import FakeClock
 from app.db.models import BotUser
 from app.db.repositories.users import BotUserRepository
 from app.menu.navigator import MenuNavigator
+from app.menu.screens.home import ChatSummary
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from tests.support.fake_session import FakeBotSession
@@ -124,7 +125,7 @@ async def test_home_edits_the_stored_menu_message(
     user = await new_user(db_session, admin_id)
     user.menu_message_id = 100  # the language screen was sent earlier
 
-    await navigator.show_home(bot=bot, session=db_session, user=user, locale="en")
+    await navigator.show_home(bot=bot, session=db_session, user=user, locale="en", chats=[])
     await db_session.commit()
 
     assert "SendMessage" not in session.call_names()
@@ -146,7 +147,7 @@ async def test_home_buttons_offer_add_to_chat_language_and_how_it_works(
     user = await new_user(db_session, admin_id)
     user.menu_message_id = 100
 
-    await navigator.show_home(bot=bot, session=db_session, user=user, locale="en")
+    await navigator.show_home(bot=bot, session=db_session, user=user, locale="en", chats=[])
 
     markup: InlineKeyboardMarkup = session.calls_of("EditMessageText")[0].method.reply_markup
     (add_to_chat,), (language,), (how_it_works,) = markup.inline_keyboard
@@ -157,6 +158,36 @@ async def test_home_buttons_offer_add_to_chat_language_and_how_it_works(
     assert language.callback_data == "menu:language:"
     assert how_it_works.text == "How it works"
     assert how_it_works.callback_data == "menu:how-it-works:"
+
+
+async def test_home_offers_one_button_per_chat_above_the_fixed_rows(
+    admin_id: int,
+    session: FakeBotSession,
+    bot: Bot,
+    db_session: AsyncSession,
+    navigator: MenuNavigator,
+) -> None:
+    user = await new_user(db_session, admin_id)
+    user.menu_message_id = 100
+
+    await navigator.show_home(
+        bot=bot,
+        session=db_session,
+        user=user,
+        locale="en",
+        chats=[
+            ChatSummary(chat_id=-100200, title="My Chat"),
+            ChatSummary(chat_id=-100300, title=None),
+        ],
+    )
+
+    markup: InlineKeyboardMarkup = session.calls_of("EditMessageText")[0].method.reply_markup
+    (first,), (second,), (add_to_chat,) = markup.inline_keyboard[:3]
+    assert first.text == "My Chat"
+    assert first.callback_data == "chat:-100200"  # the callback data carries the chat_id
+    assert second.text == "—"  # a chat without a title still gets its button
+    assert second.callback_data == "chat:-100300"
+    assert add_to_chat.text == "🔵 Add to chat"
 
 
 async def test_uneditable_menu_message_is_replaced_by_a_new_one(

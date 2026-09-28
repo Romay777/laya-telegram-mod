@@ -32,3 +32,4 @@ menu-right-can_restrict_members = ограничение участников
 menu-link-problem-not-admin = Вы не администратор этого чата.
 menu-link-check-again = 🔵 Проверить снова
 menu-link-expired = Ссылка устарела. Нажмите 🔵 Добавить чат на главном экране, чтобы получить новую.
+menu-chat-access-lost = Вы больше не администратор этого чата.

@@ -1,8 +1,7 @@
 """Callback data factories for the Menu (§13).
 
-The screens implemented so far are not chat-scoped, so they carry no
-`chat_id`; chat-scoped screens (later tickets) include it so the Admin check
-can run.
+Every factory that refers to a chat carries the `chat_id`, so the handler can
+re-check Admin access before doing anything.
 """
 
 from enum import StrEnum
@@ -39,5 +38,11 @@ class FallbackCheckCallback(CallbackData, prefix="link-check-fb"):
     A separate factory from the deep-link Check again, because the fallback
     path has no one-hour token: its re-check never asks for an intent.
     """
+
+    chat_id: int
+
+
+class ChatCallback(CallbackData, prefix="chat"):
+    """A chat-scoped Menu callback (§13): open (and later manage) one chat."""
 
     chat_id: int
