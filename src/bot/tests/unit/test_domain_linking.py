@@ -4,9 +4,13 @@ Given the chat type, the bot's rights and the status of the person who added
 the bot, the function returns exactly what is missing, in check order. A
 non-supergroup short-circuits: the other checks say nothing useful about a
 basic group.
+
+Also: the fallback Linking input (§10), where the Admin names the chat with
+an @username or a numeric id.
 """
 
-from app.domain.linking import linking_problems
+import pytest
+from app.domain.linking import linking_problems, parse_chat_ref
 
 
 def test_a_supergroup_with_all_rights_and_an_admin_linker_has_no_problems() -> None:
@@ -78,3 +82,22 @@ def test_missing_rights_and_a_non_admin_linker_are_reported_together() -> None:
 
     assert problems.missing_rights == ("can_delete_messages",)
     assert problems.from_not_admin
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("@my_chat", "@my_chat"),
+        ("  @my_chat  ", "@my_chat"),  # stray whitespace is not part of the username
+        ("-1001234567890", "-1001234567890"),
+        ("-123456", "-123456"),  # a basic group id
+    ],
+)
+def test_a_fallback_input_parses_to_what_getchat_accepts(text: str, expected: str) -> None:
+    assert parse_chat_ref(text) == expected
+
+
+@pytest.mark.parametrize("text", [None, "", "hello", "my_chat", "123456", "@"])
+def test_text_that_names_no_chat_parses_to_none(text: str | None) -> None:
+    # A positive number is a user id, not a chat; a bare word is not a username.
+    assert parse_chat_ref(text) is None

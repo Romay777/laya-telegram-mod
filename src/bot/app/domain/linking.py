@@ -11,6 +11,7 @@ Whatever fails is reported, so the Admin's Menu can list exactly what is
 missing. No Telegram, no DB, no I/O.
 """
 
+import re
 from dataclasses import dataclass
 
 #: The rights the bot needs on a Linked Chat (§10). Order matters: it is the
@@ -19,6 +20,9 @@ REQUIRED_RIGHTS: tuple[str, ...] = ("can_delete_messages", "can_restrict_members
 
 #: Chat statuses that count as an Admin of the chat.
 ADMIN_STATUSES = frozenset({"creator", "administrator"})
+
+#: A negative integer: a chat id, never a user id.
+_CHAT_ID = re.compile(r"-\d+")
 
 #: The §12 defaults a Linked Chat is created with on Linking.
 DEFAULT_LADDER: tuple[int, ...] = (3600, 86400, 0)  # 1 hour → 24 hours → forever
@@ -59,3 +63,20 @@ def linking_problems(
         missing_rights=tuple(right for right in REQUIRED_RIGHTS if not held[right]),
         from_not_admin=linker_status not in ADMIN_STATUSES,
     )
+
+
+def parse_chat_ref(text: str | None) -> str | None:
+    """The chat a fallback Linking input names (§10), as `getChat` accepts it.
+
+    The Admin answers with an @username or a numeric id (`-100…`); anything
+    else names no chat and is reported back instead of sent to Telegram.
+    """
+
+    if text is None:
+        return None
+    candidate = text.strip()
+    if candidate.startswith("@") and len(candidate) > 1:
+        return candidate
+    if _CHAT_ID.fullmatch(candidate):
+        return candidate
+    return None
