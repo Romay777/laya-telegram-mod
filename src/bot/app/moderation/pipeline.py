@@ -120,6 +120,8 @@ class ModerationPipeline:
         decision = decide(
             probabilities=outcome,
             violation_threshold=self._violation_threshold(chat),
+            suspicion_threshold=self._suspicion_threshold(chat),
+            mode=chat.mode,
         )
         check = await self._record(
             repo,
@@ -229,3 +231,7 @@ class ModerationPipeline:
         """The chat's Sensitivity preset for its backend (§3; per-Category
         overrides are reserved for later)."""
         return self._thresholds[chat.backend][chat.sensitivity].violation
+
+    def _suspicion_threshold(self, chat: Chat) -> float:
+        """The lower zone's threshold, from the same Sensitivity preset (§3)."""
+        return self._thresholds[chat.backend][chat.sensitivity].suspicion

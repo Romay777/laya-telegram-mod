@@ -1,11 +1,12 @@
-"""Pure Decision rule (§4 step 8): probabilities plus a threshold → Decision.
+"""Pure Decision rule (§4 step 8): the two-zone table (ADR-0003).
 
-The Verdict is the highest-probability label of the question spec. This
-ticket acts on the Violation zone only: a non-clean label at or above the
-chat's violation threshold is a Violation, everything else is left alone
-(§4: Suspicions in the middle band arrive with ticket #9).
+    | Mode             | p ≥ violation | suspicion ≤ p < violation | below   |
+    |------------------|---------------|---------------------------|---------|
+    | Auto-moderation  | Violation     | Suspicion                 | nothing |
+    | Observation Mode | Suspicion     | Suspicion                 | nothing |
 
-No Telegram, no DB, no I/O.
+The Verdict is the highest-probability label of the question spec; the
+thresholds only sort it into a zone. No Telegram, no DB, no I/O.
 """
 
 from collections.abc import Mapping
@@ -16,25 +17,38 @@ CLEAN = "clean"
 
 #: The `message_check` outcomes of a message that reached the classifier (§12).
 OUTCOME_VIOLATION = "violation"
+OUTCOME_SUSPICION = "suspicion"
 OUTCOME_CLEAN = "clean"
+
+#: The two chat modes (§12): Auto-moderation and Observation Mode.
+MODE_AUTO = "auto"
+MODE_OBSERVATION = "observation"
 
 
 @dataclass(frozen=True, slots=True)
 class Decision:
     """What one check decided: the Verdict and which zone it fell into."""
 
-    outcome: str  # violation | clean
+    outcome: str  # violation | suspicion | clean
     category: str  # the highest-probability label, `clean` included
     confidence: float
 
 
-def decide(*, probabilities: Mapping[str, float], violation_threshold: float) -> Decision:
-    """The Verdict is the argmax label; the threshold only gates the Violation."""
+def decide(
+    *,
+    probabilities: Mapping[str, float],
+    violation_threshold: float,
+    suspicion_threshold: float,
+    mode: str,
+) -> Decision:
+    """The argmax label, sorted into a zone by the mode and the thresholds."""
     category = max(probabilities, key=lambda label: probabilities[label])
     confidence = probabilities[category]
-    violation = category != CLEAN and confidence >= violation_threshold
-    return Decision(
-        outcome=OUTCOME_VIOLATION if violation else OUTCOME_CLEAN,
-        category=category,
-        confidence=confidence,
-    )
+    if category != CLEAN and confidence >= suspicion_threshold:
+        # One zone is flagged in both modes; only Auto-moderation splits it
+        # further into a full Violation (ADR-0003).
+        violation = mode == MODE_AUTO and confidence >= violation_threshold
+        outcome = OUTCOME_VIOLATION if violation else OUTCOME_SUSPICION
+    else:
+        outcome = OUTCOME_CLEAN
+    return Decision(outcome=outcome, category=category, confidence=confidence)
