@@ -6,6 +6,7 @@ callback that refers to a chat re-checks access.
 """
 
 from collections.abc import AsyncIterator, Iterator
+from datetime import timedelta
 from itertools import count
 
 import pytest
@@ -14,7 +15,7 @@ from app.db.models import Chat
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.support.harness import TestApp, app_fixture
-from tests.support.telegram import member_owner
+from tests.support.telegram import member_administrator, member_member, member_owner
 from tests.support.updates import (
     my_chat_member_update,
     private_callback_update,
@@ -129,3 +130,102 @@ async def test_opening_the_chat_shows_its_screen_without_asking_again(
     assert "Sensitivity: Balanced" in text
     (back,) = edit.reply_markup.inline_keyboard[0]
     assert back.callback_data == "menu:home:"
+
+
+async def test_a_co_admin_who_is_not_the_linker_can_manage_the_chat(
+    app: TestApp, admin_id: int, second_admin_id: int, chat_id: int
+) -> None:
+    """Access is a Telegram fact: another current administrator sees and opens the chat."""
+    await linked_via_deeplink(app, admin_id, chat_id)
+
+    # A co-admin starts the bot; nobody subscribed them anywhere (§9).
+    # Picking the language renders Home, which is where the chat is first checked.
+    app.session.script(GetChatMember, member_administrator(user(second_admin_id)))
+    co_menu = await started_admin(app, second_admin_id)
+
+    await app.feed(
+        private_callback_update(second_admin_id, "menu:home:", co_menu, language_code="en")
+    )
+
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    (chat_row,) = edit.reply_markup.inline_keyboard[0]
+    assert chat_row.text == "My Chat"  # the co-admin's Home lists it like the Linker's
+    assert chat_row.callback_data == f"chat:{chat_id}"
+    app.session.calls.clear()
+
+    await app.feed(
+        private_callback_update(second_admin_id, f"chat:{chat_id}", co_menu, language_code="en")
+    )
+
+    # The Home render just asked Telegram; the cached answer covers the open.
+    assert app.session.calls_of("GetChatMember") == []
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    text = (edit.text or "").splitlines()
+    assert text[0] == "My Chat"  # the co-admin manages the same Chat screen
+    assert "Mode: Observation Mode" in text
+
+
+async def test_a_demoted_admin_loses_access_once_the_cache_has_expired(
+    app: TestApp, admin_id: int, second_admin_id: int, chat_id: int
+) -> None:
+    """The cached answer keeps them in for ttl_s; the next check shuts the door (§10)."""
+    await linked_via_deeplink(app, admin_id, chat_id)
+    # Picking the language renders Home, which is where the chat is first checked.
+    app.session.script(GetChatMember, member_administrator(user(second_admin_id)))
+    co_menu = await started_admin(app, second_admin_id)
+    await app.feed(
+        private_callback_update(second_admin_id, "menu:home:", co_menu, language_code="en")
+    )
+
+    # The co-admin is demoted while their cached answer is still fresh.
+    app.clock.advance(timedelta(seconds=100))
+    await app.feed(
+        private_callback_update(second_admin_id, f"chat:{chat_id}", co_menu, language_code="en")
+    )
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert (edit.text or "").splitlines()[0] == "My Chat"  # still inside the ttl_s window
+    app.session.calls.clear()
+
+    # Past admin_cache.ttl_s the answer is stale: the check runs again.
+    app.clock.advance(timedelta(seconds=301))
+    app.session.script(GetChatMember, member_member(user(second_admin_id)))
+    await app.feed(
+        private_callback_update(second_admin_id, f"chat:{chat_id}", co_menu, language_code="en")
+    )
+
+    # A toast explains the dead end, and the bot is sent back to Home.
+    answer = app.session.calls_of("AnswerCallbackQuery")[-1].method
+    assert answer.text == "You are no longer an admin of this chat."
+    assert answer.show_alert is False  # a toast, not an alert
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    assert edit.text == "Menu"  # the Home screen
+    assert edit.reply_markup.inline_keyboard[0][0].callback_data != f"chat:{chat_id}"
+
+
+async def test_home_hides_chats_the_user_is_no_longer_an_admin_of(
+    app: TestApp, admin_id: int, chat_id: int, second_chat_id: int
+) -> None:
+    menu_message_id = await linked_via_deeplink(app, admin_id, chat_id, title="First")
+    app.clock.advance(timedelta(seconds=1))  # the second chat links a moment later
+    await app.feed(
+        private_callback_update(admin_id, "menu:add-to-chat:", menu_message_id, language_code="en")
+    )
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        my_chat_member_update(second_chat_id, "supergroup", linker_id=admin_id, title="Second")
+    )
+    app.session.calls.clear()
+
+    # The bot was demoted in the first chat; the second is untouched.
+    app.session.script(GetChatMember, member_member(user(admin_id)))  # First
+    app.session.script(GetChatMember, member_owner(user(admin_id)))  # Second
+    await app.feed(
+        private_callback_update(admin_id, "menu:home:", menu_message_id, language_code="en")
+    )
+
+    edit = app.session.calls_of("EditMessageText")[-1].method
+    rows = edit.reply_markup.inline_keyboard
+    (only_chat,) = rows[0]
+    assert only_chat.text == "Second"
+    assert only_chat.callback_data == f"chat:{second_chat_id}"
+    assert all(row[0].callback_data != f"chat:{chat_id}" for row in rows)
