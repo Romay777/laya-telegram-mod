@@ -68,11 +68,18 @@ async def test_the_chat_screen_leads_to_the_mode_switch(
     edit = app.session.calls_of("EditMessageText")[-1].method
     assert "My Chat" in (edit.text or "")
     assert "Mode: Observation Mode" in (edit.text or "")
-    (enable_auto,), (categories,), (sensitivity,), (language,), (my_alerts,), (back_to_chat,) = (
-        edit.reply_markup.inline_keyboard
-    )
+    (
+        (enable_auto,),
+        (categories,),
+        (sensitivity,),
+        (ladder,),
+        (language,),
+        (my_alerts,),
+        (back_to_chat,),
+    ) = edit.reply_markup.inline_keyboard
     assert categories.callback_data == f"chat-categories:{chat_id}:"  # §13: Categories
     assert sensitivity.callback_data == f"chat-sensitivity:{chat_id}:"  # §13: Sensitivity
+    assert ladder.callback_data == f"chat-ladder:{chat_id}"  # §13: Penalty Ladder
     assert language.callback_data == f"chat-language:{chat_id}:"  # §13: Chat Language
     assert my_alerts.callback_data == f"chat-alerts:{chat_id}:"  # §13: My alerts
     assert enable_auto.text == "🟢 Enable auto-moderation"
