@@ -19,6 +19,13 @@ alert-suspicion-punished = 🔴 Наказал {$admin}
 alert-suspicion-dismissed = Отклонил подозрение {$admin}
 alert-suspicion-not-deleted = Сообщение старше 48 часов, поэтому оно остаётся в чате.
 alert-suspicion-expired = Это подозрение уже истекло.
+alert-notice-not-sent = Уведомление не отправлено (лимит частоты).
+alert-burst-summary = {$count ->
+    [one] ⚡ {$count} нарушение за последнюю минуту в {$chat}
+    [few] ⚡ {$count} нарушения за последнюю минуту в {$chat}
+   *[many] ⚡ {$count} нарушений за последнюю минуту в {$chat}
+}
+alert-open-journal = Открыть журнал
 summary-header = 📊 {$chat} — последние {$hours} часов
 summary-suspicions = Подозрений: {$count}
 summary-punished = Наказано вами: {$count}

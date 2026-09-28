@@ -7,15 +7,23 @@ alert goes out as a private message in that Admin's language, paced about
 one message per second per Admin; a 403 marks the Admin unreachable and
 they are skipped from then on. Every sent message is recorded in
 `admin_alert`, so any decision can later edit every copy.
+
+In a raid the Violation alerts burst (§9): the first five per chat per
+minute go out one by one, and the rest of that minute is covered by one
+summary alert per chat — "N violations in the last minute in {chat}",
+with an Open journal button. Restrictions and deletions carry on
+regardless.
 """
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +43,7 @@ from app.i18n import GetText, translator_for
 from app.linking.admin_cache import AdminCache
 from app.menu.callbacks import (
     AppealDecideCallback,
+    JournalCallback,
     LiftRestrictionCallback,
     SuspicionDecideCallback,
 )
@@ -48,6 +57,22 @@ FALLBACK_LANGUAGE = "en"
 
 #: The alert modes that receive Appeals (§9): `all` and `appeals`.
 APPEAL_MODES = ("all", "appeals")
+
+#: §9 burst handling: the first five Violation alerts per chat per minute
+#: go out one by one; the rest of that minute shares one summary alert.
+BURST_AFTER = 5
+
+#: The length of a burst window: one summary alert per chat per minute (§9).
+BURST_WINDOW = timedelta(minutes=1)
+
+
+@dataclass(slots=True)
+class _Burst:
+    """One chat's burst window: the minute since its first Violation alert."""
+
+    started_at: datetime
+    individuals: int = 0
+    overflow: int = 0
 
 
 def lift_keyboard(t: GetText, chat_id: int, violation_id: int) -> InlineKeyboardMarkup:
@@ -91,6 +116,20 @@ def appeal_keyboard(t: GetText, chat_id: int, appeal_id: int) -> InlineKeyboardM
     )
 
 
+def journal_keyboard(t: GetText, chat_id: int) -> InlineKeyboardMarkup:
+    """The Open journal button of a burst summary (§9)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("alert-open-journal"),
+                    callback_data=JournalCallback(chat_id=chat_id).pack(),
+                )
+            ]
+        ]
+    )
+
+
 def suspicion_keyboard(t: GetText, chat_id: int, suspicion_id: int) -> InlineKeyboardMarkup:
     """The two decision buttons of a Suspicion alert (§9): 🔴 Punish · Dismiss."""
     return InlineKeyboardMarkup(
@@ -128,6 +167,7 @@ class AlertFanout:
         self._pace_s = pace_s
         self._sleep = sleep
         self._last_sent: dict[int, datetime] = {}
+        self._bursts: dict[int, _Burst] = {}
 
     async def violation_alert(
         self,
@@ -144,7 +184,47 @@ class AlertFanout:
         flagged_entities: list[dict[str, Any]] | None,
         violation_id: int,
     ) -> None:
-        """Send the Violation alert to every Admin whose mode is `all` (§9)."""
+        """Send the Violation alert to every Admin whose mode is `all` (§9).
+
+        In a burst — more than five Violations in one chat in a minute —
+        the rest of the minute is covered by one summary alert instead (§9).
+        """
+        burst = self._burst_of(chat.chat_id, self._clock.now())
+        if burst.individuals < BURST_AFTER:
+            burst.individuals += 1
+            await self._violation_alert_copy(
+                bot,
+                session,
+                admin_cache=admin_cache,
+                chat=chat,
+                member_name=member_name,
+                category=category,
+                confidence=confidence,
+                step_seconds=step_seconds,
+                flagged_text=flagged_text,
+                flagged_entities=flagged_entities,
+                violation_id=violation_id,
+            )
+            return
+        burst.overflow += 1
+        await self._burst_summary(bot, session, admin_cache=admin_cache, chat=chat)
+
+    async def _violation_alert_copy(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        member_name: str,
+        category: str,
+        confidence: float,
+        step_seconds: int,
+        flagged_text: str | None,
+        flagged_entities: list[dict[str, Any]] | None,
+        violation_id: int,
+    ) -> None:
+        """One Violation alert, one copy per `all`-mode Admin (§9)."""
         recipients = await AdminSubscriptionRepository(session).user_ids_with_mode(
             chat.chat_id, alert_mode="all"
         )
@@ -173,6 +253,110 @@ class AlertFanout:
                 subject_type="violation",
                 subject_id=violation_id,
             )
+
+    def _burst_of(self, chat_id: int, now: datetime) -> _Burst:
+        """The chat's burst window: a fresh one each minute (§9)."""
+        burst = self._bursts.get(chat_id)
+        if burst is None or now - burst.started_at >= BURST_WINDOW:
+            burst = _Burst(started_at=now)
+            self._bursts[chat_id] = burst
+        return burst
+
+    async def _burst_summary(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+    ) -> None:
+        """The one summary alert per chat per minute, kept up to date (§9).
+
+        The first overflow Violation of a minute sends it; the rest edit
+        every copy in place, so one alert still covers the whole minute.
+        Copies are read back from `admin_alert`, so the summary survives a
+        restart within the minute.
+        """
+        burst = self._bursts[chat.chat_id]
+        subject_id = int(burst.started_at.timestamp())
+        copies = [
+            copy
+            for copy in await AlertRepository(session).alerts_for("burst", subject_id)
+            if copy.chat_id == chat.chat_id
+        ]
+        if not copies:
+            recipients = await AdminSubscriptionRepository(session).user_ids_with_mode(
+                chat.chat_id, alert_mode="all"
+            )
+            async for admin_id, _user, t in self._recipients(
+                bot, session, admin_cache, chat, recipients
+            ):
+                await self._send_alert(
+                    bot,
+                    session,
+                    chat=chat,
+                    admin_id=admin_id,
+                    t=t,
+                    text=t("alert-burst-summary", count=burst.overflow, chat=chat.title),
+                    entities=[],
+                    markup=journal_keyboard(t, chat.chat_id),
+                    subject_type="burst",
+                    subject_id=subject_id,
+                )
+            return
+        for copy in copies:
+            t = await self._translator_of(session, copy.admin_id)
+            with contextlib.suppress(TelegramBadRequest):
+                await bot.edit_message_text(
+                    chat_id=copy.admin_id,
+                    message_id=copy.message_id,
+                    text=t("alert-burst-summary", count=burst.overflow, chat=chat.title),
+                    reply_markup=journal_keyboard(t, chat.chat_id),
+                )
+
+    async def notice_not_sent(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        chat: Chat,
+        violation_id: int,
+        member_name: str,
+        category: str,
+        confidence: float,
+        step_seconds: int,
+        flagged_text: str | None,
+        flagged_entities: list[dict[str, Any]] | None,
+    ) -> None:
+        """Append "notice not sent (rate limit)" to every copy of the Violation
+        alert (§7): the notice aged out of the queue, so the drop shows where
+        the Admins read about the Violation. Violations covered by a burst
+        summary have no individual copy — the summary already stands in."""
+        for copy in await AlertRepository(session).alerts_for("violation", violation_id):
+            t = await self._translator_of(session, copy.admin_id)
+            text, entities = render_violation_alert(
+                t,
+                chat_title=chat.title or str(chat.chat_id),
+                member_name=member_name,
+                category=category,
+                confidence=confidence,
+                step_seconds=step_seconds,
+                flagged_text=flagged_text,
+                flagged_entities=flagged_entities,
+            )
+            with contextlib.suppress(TelegramBadRequest):
+                await bot.edit_message_text(
+                    chat_id=copy.admin_id,
+                    message_id=copy.message_id,
+                    text=f"{text}\n{t('alert-notice-not-sent')}",
+                    entities=[MessageEntity.model_validate(entity) for entity in entities],
+                )
+
+    async def _translator_of(self, session: AsyncSession, admin_id: int) -> GetText:
+        """The translator of an Admin's interface language (§15)."""
+        user = await BotUserRepository(session).get(admin_id)
+        locale = user.language if user is not None and user.language else FALLBACK_LANGUAGE
+        return translator_for(self._core, locale)
 
     async def appeal_alert(
         self,

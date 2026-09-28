@@ -22,3 +22,4 @@ notice-appeal-rejected = ❌ Appeal rejected
 notice-appeal-not-for-you = This button isn't for you
 notice-appeal-already-sent = Already sent
 notice-appeal-too-late = The restriction has already been lifted
+notice-appeal-dropped = No appeal is possible: the notice was not sent

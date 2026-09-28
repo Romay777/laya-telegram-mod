@@ -28,3 +28,4 @@ notice-appeal-rejected = ❌ Апелляция отклонена
 notice-appeal-not-for-you = Эта кнопка не для вас
 notice-appeal-already-sent = Уже отправлено
 notice-appeal-too-late = Ограничение уже снято
+notice-appeal-dropped = Апелляция невозможна: уведомление не было отправлено
