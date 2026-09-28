@@ -11,12 +11,23 @@ from itertools import count
 
 import pytest
 from aiogram.methods import GetChatMember
-from app.db.models import Chat
+from app.db.models import Chat, Suspicion
+from app.menu.callbacks import SuspicionDecideCallback
+from app.scheduler import Scheduler
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.support.harness import FIXED_NOW, TestApp, app_fixture, started_admin
-from tests.support.telegram import member_owner
-from tests.support.updates import my_chat_member_update, private_callback_update, user
+from tests.support.telegram import member_administrator, member_member, member_owner
+from tests.support.updates import (
+    group_message_update,
+    my_chat_member_update,
+    private_callback_update,
+    user,
+)
+
+SPAMMY_HIGH = {"spam": 0.97, "ads": 0.01, "insult": 0.01, "clean": 0.01}
+SPAM_TEXT = "Buy cheap crypto now, DM me https://t.me/+abc"
 
 # The Postgres container is shared, so every test gets its own people and chat.
 _admin_ids = count(1750, 10)
@@ -60,7 +71,7 @@ async def stored_chat(session_maker: async_sessionmaker[AsyncSession], chat_id: 
 async def test_after_linking_the_menu_offers_the_auto_moderation_choice(
     app: TestApp, admin_id: int, chat_id: int
 ) -> None:
-    menu = await linked_menu(app, admin_id, chat_id)
+    await linked_menu(app, admin_id, chat_id)
 
     edit = app.session.calls_of("EditMessageText")[-1].method
     assert "✅ My Chat linked" in (edit.text or "")
@@ -115,3 +126,103 @@ async def test_enabling_auto_moderation_now_arms_the_chat(
     assert chat.observation_summary_at is None  # no summary was ever scheduled
     edit = app.session.calls_of("EditMessageText")[-1].method
     assert "Mode: Auto-moderation" in (edit.text or "")
+
+
+# --- The one Observation summary at observation_summary_at (§11, §13) -------
+
+
+async def opt_in_second_admin(app: TestApp, chat_id: int) -> int:
+    """A second, real Admin opts into All alerts (§9)."""
+    second_id = next(_admin_ids)
+    app.session.script(GetChatMember, member_administrator(user(second_id)))
+    other_menu = await started_admin(app, second_id)
+    for data in (
+        f"chat:{chat_id}",
+        f"chat-settings:{chat_id}",
+        f"chat-alerts:{chat_id}:",
+        f"chat-alerts:{chat_id}:all",
+    ):
+        await app.feed(private_callback_update(second_id, data, other_menu, language_code="en"))
+    return second_id
+
+
+async def scheduler(app: TestApp):
+    return Scheduler(
+        bot=app.bot, session_maker=app.session_maker, clock=app.clock, core=app.i18n.core
+    )
+
+
+async def test_the_48_hour_summary_fires_once_and_enabling_arms_the_chat(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """Link → observe → suspicion → punish → 48h later: one summary, then auto."""
+    menu = await linked_menu(app, admin_id, chat_id)
+    await opt_in_second_admin(app, chat_id)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))  # the choice's re-check
+    await app.feed(
+        private_callback_update(admin_id, f"observe:{chat_id}", menu, language_code="en")
+    )
+
+    # During observation a high-confidence hit becomes a Suspicion, and the
+    # Linker punishes it (the counts of the summary will show 1 and 1).
+    member_id = next(_admin_ids)
+    app.backend.script(SPAMMY_HIGH)
+    app.session.script(GetChatMember, member_member(user(member_id)))  # the sender
+    app.session.calls.clear()
+    await app.feed(
+        group_message_update(chat_id, member_id, SPAM_TEXT, message_id=91, sender_name="Spammer")
+    )
+    suspicion_alert = app.session.calls_of("SendMessage")[0]
+    async with app.session_maker() as db:
+        suspicion = (await db.execute(select(Suspicion))).scalars().one()
+    app.session.script(GetChatMember, member_member(user(member_id)))  # the notice's {user}
+    await app.feed(
+        private_callback_update(
+            admin_id,
+            SuspicionDecideCallback(chat_id=chat_id, suspicion_id=suspicion.id, punish=True).pack(),
+            suspicion_alert.result.message_id,
+            language_code="en",
+            username="alpha",
+        )
+    )
+    app.session.calls.clear()
+
+    # The summary is not due before 48 hours have passed (§11) — the tick
+    # may still do its other jobs (the punished Violation's notice removal).
+    app.clock.advance(timedelta(hours=47))
+    await (await scheduler(app)).run_once()
+    assert app.session.calls_of("SendMessage") == []
+
+    app.clock.advance(timedelta(hours=1))
+    await (await scheduler(app)).run_once()
+
+    (summary,) = app.session.calls_of("SendMessage")
+    assert summary.method.chat_id == admin_id  # the Linker gets it (§13)
+    assert (summary.method.text or "").splitlines() == [
+        "📊 My Chat — the last 48 hours",
+        "Suspicions: 1",
+        "Punished by you: 1",
+    ]
+    (enable,) = summary.method.reply_markup.inline_keyboard[0]
+    assert enable.text == "🟢 Enable auto-moderation"  # §9: the offer repeats once
+    assert enable.callback_data == f"enable-auto:{chat_id}"
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.summary_sent is True
+    app.session.calls.clear()
+
+    # Sent once, never repeated (§13).
+    await (await scheduler(app)).run_once()
+    assert app.session.calls == []
+
+    # The Linker takes the offer: the chat arms Auto-moderation (§13).
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        private_callback_update(
+            admin_id, f"enable-auto:{chat_id}", menu, language_code="en", username="alpha"
+        )
+    )
+    print(
+        "SCRIPTED LEFT:", [type(o).__name__ for o in app.session._scripted.get(GetChatMember, [])]
+    )
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.mode == "auto"
