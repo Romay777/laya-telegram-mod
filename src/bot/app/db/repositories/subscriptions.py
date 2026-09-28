@@ -29,9 +29,13 @@ class AdminSubscriptionRepository:
 
     async def user_ids_with_mode(self, chat_id: int, *, alert_mode: str) -> list[int]:
         """The Admins subscribed at one mode for the chat, in stable order."""
+        return await self.user_ids_with_modes(chat_id, modes=(alert_mode,))
+
+    async def user_ids_with_modes(self, chat_id: int, *, modes: tuple[str, ...]) -> list[int]:
+        """The Admins subscribed at any of the modes, in stable order (§9)."""
         rows = await self.session.scalars(
             select(AdminSubscription.user_id)
-            .where(AdminSubscription.chat_id == chat_id, AdminSubscription.alert_mode == alert_mode)
+            .where(AdminSubscription.chat_id == chat_id, AdminSubscription.alert_mode.in_(modes))
             .order_by(AdminSubscription.user_id)
         )
         return list(rows)
