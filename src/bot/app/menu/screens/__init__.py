@@ -9,6 +9,7 @@ from app.menu.screens.language import language_screen
 from app.menu.screens.link_expired import link_expired_screen
 from app.menu.screens.link_failed import link_failed_screen
 from app.menu.screens.linked_chat import linked_chat_screen
+from app.menu.screens.settings import settings_screen
 
 __all__ = [
     "add_chat_screen",
@@ -20,4 +21,5 @@ __all__ = [
     "link_expired_screen",
     "link_failed_screen",
     "linked_chat_screen",
+    "settings_screen",
 ]

@@ -9,12 +9,18 @@ from aiogram.types import CallbackQuery, Message
 from aiogram_i18n import I18nContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BotUser
+from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.i18n import SUPPORTED_LANGUAGES, translator_for
 from app.linking.admin_cache import AdminCache
 from app.linking.service import FallbackLinkStates, LinkingService
-from app.menu.callbacks import ChatCallback, MenuAction, MenuCallback
+from app.menu.callbacks import (
+    ChatCallback,
+    ChatModeCallback,
+    ChatSettingsCallback,
+    MenuAction,
+    MenuCallback,
+)
 from app.menu.navigator import MenuNavigator
 from app.menu.screens.home import ChatSummary
 
@@ -144,27 +150,85 @@ def create_private_router() -> Router:
         await state.clear()
 
         # Every chat-scoped callback re-checks Admin access (§10, §13).
-        chat = await ChatRepository(session).get(callback_data.chat_id)
-        if chat is None or not await admin_cache.is_admin(bot, chat.chat_id, callback.from_user.id):
-            t = translator_for(i18n.core, i18n.locale)
-            await callback.answer(text=t("menu-chat-access-lost"), show_alert=False)
-            await navigator.show_home(
-                bot=bot,
-                session=session,
-                user=bot_user,
-                locale=i18n.locale,
-                chats=await _administered_chats(bot, admin_cache, session, callback.from_user.id),
-            )
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
             return
 
         await navigator.show_chat(
             bot=bot,
             session=session,
             user=bot_user,
+            chat_id=chat.chat_id,
             chat_title=chat.title,
             mode=chat.mode,
             backend=chat.backend,
             sensitivity=chat.sensitivity,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(ChatSettingsCallback.filter(), F.message.chat.type == "private")
+    async def open_settings(
+        callback: CallbackQuery,
+        callback_data: ChatSettingsCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        await navigator.show_settings(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            mode=chat.mode,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(ChatModeCallback.filter(), F.message.chat.type == "private")
+    async def switch_mode(
+        callback: CallbackQuery,
+        callback_data: ChatModeCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """The Mode switch (§13): arms Auto-moderation, or returns to observation."""
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        chat.mode = "observation" if chat.mode == "auto" else "auto"
+        await session.flush()
+        await navigator.show_settings(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            mode=chat.mode,
             locale=i18n.locale,
         )
         await callback.answer()
@@ -192,6 +256,41 @@ def create_private_router() -> Router:
         )
 
     return router
+
+
+async def _accessible_chat(
+    bot: Bot,
+    admin_cache: AdminCache,
+    session: AsyncSession,
+    callback: CallbackQuery,
+    chat_id: int,
+) -> Chat | None:
+    """The chat a chat-scoped callback names, if the presser still administers it (§13)."""
+    chat = await ChatRepository(session).get(chat_id)
+    if chat is None or not await admin_cache.is_admin(bot, chat.chat_id, callback.from_user.id):
+        return None
+    return chat
+
+
+async def _access_lost(
+    bot: Bot,
+    admin_cache: AdminCache,
+    session: AsyncSession,
+    navigator: MenuNavigator,
+    bot_user: BotUser,
+    callback: CallbackQuery,
+    i18n: I18nContext,
+) -> None:
+    """A stale callback: a toast explains the dead end, and Home takes over (§13)."""
+    t = translator_for(i18n.core, i18n.locale)
+    await callback.answer(text=t("menu-chat-access-lost"), show_alert=False)
+    await navigator.show_home(
+        bot=bot,
+        session=session,
+        user=bot_user,
+        locale=i18n.locale,
+        chats=await _administered_chats(bot, admin_cache, session, callback.from_user.id),
+    )
 
 
 async def _administered_chats(

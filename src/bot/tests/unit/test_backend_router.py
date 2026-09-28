@@ -9,7 +9,7 @@ at once; a client timeout is `skipped_timeout`; any other backend failure is
 import asyncio
 
 from app.classifiers.client import SystemOneError, SystemOneTimeoutError
-from app.classifiers.router import CheckSkip, BackendRouter
+from app.classifiers.router import BackendRouter, CheckSkip
 
 CLEAN = {"spam": 0.02, "ads": 0.03, "insult": 0.01, "clean": 0.94}
 STATE = {"message": "hello there friends", "urls": []}

@@ -9,7 +9,7 @@ from datetime import timedelta
 from itertools import count
 
 from app.clock import FakeClock
-from app.db.models import Chat, ChatNotice, FlaggedMessage, MessageCheck, Violation
+from app.db.models import Chat, ChatNotice, FlaggedMessage, MessageCheck
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.moderation import ModerationRepository
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,7 +36,9 @@ async def a_chat(db_session: AsyncSession, clock: FakeClock, **overrides: object
     return chat
 
 
-async def a_check(repo: ModerationRepository, chat: Chat, user_id: int, when: object) -> MessageCheck:
+async def a_check(
+    repo: ModerationRepository, chat: Chat, user_id: int, when: object
+) -> MessageCheck:
     return await repo.record_check(
         chat_id=chat.chat_id,
         user_id=user_id,
@@ -215,7 +217,10 @@ async def test_flagged_text_is_stored_becomes_due_and_purges(
     check = await a_check(repo, chat, 555, clock.now())
     purge_at = clock.now() + timedelta(days=30)
     await repo.store_flagged(
-        check.id, text="Buy cheap crypto now", entities=[{"type": "url", "offset": 0}], purge_at=purge_at
+        check.id,
+        text="Buy cheap crypto now",
+        entities=[{"type": "url", "offset": 0}],
+        purge_at=purge_at,
     )
 
     due = await repo.due_flagged(clock.now())

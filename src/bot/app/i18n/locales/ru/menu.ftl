@@ -33,3 +33,7 @@ menu-link-problem-not-admin = Вы не администратор этого ч
 menu-link-check-again = 🔵 Проверить снова
 menu-link-expired = Ссылка устарела. Нажмите 🔵 Добавить чат на главном экране, чтобы получить новую.
 menu-chat-access-lost = Вы больше не администратор этого чата.
+
+menu-chat-settings = ⚙️ Настройки
+menu-settings-enable-auto = 🟢 Включить автомодерацию
+menu-settings-observe = Перейти в режим наблюдения

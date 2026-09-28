@@ -141,9 +141,7 @@ class MessageCheck(Base):
     __tablename__ = "message_check"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    chat_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE")
-    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(BigInteger)
     message_id: Mapped[int] = mapped_column(BigInteger)
     # Edits are checked again from scratch (§4); this ticket checks originals only.
@@ -181,9 +179,7 @@ class Violation(Base):
     __tablename__ = "violation"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    chat_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE")
-    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(BigInteger)
     check_id: Mapped[int] = mapped_column(ForeignKey("message_check.id"))
     category: Mapped[str] = mapped_column(String(32))

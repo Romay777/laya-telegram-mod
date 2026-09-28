@@ -1,7 +1,6 @@
 """Pure Decision rule (§4 step 8): probabilities + the violation threshold."""
 
 import pytest
-
 from app.domain.decision import CLEAN, decide
 
 SPAMMY = {"spam": 0.97, "ads": 0.01, "insult": 0.01, "clean": 0.01}

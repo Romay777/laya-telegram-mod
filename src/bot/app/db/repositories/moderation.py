@@ -77,7 +77,7 @@ class ModerationRepository:
         """Record one Violation and the Restriction it applies (§6, in order).
 
         `active` counts the Member's unexpired, unrevoked Violations; the Step
-        taken is `ladder[min(active, len(ladder)) − 1]`. The Restriction fields
+        taken is `ladder[min(active, len(ladder)) - 1]`. The Restriction fields
         store what was applied, so the pipeline restricts from the row.
         """
         active = await self.count_active(chat.chat_id, user_id, now)
@@ -105,16 +105,19 @@ class ModerationRepository:
 
     async def count_active(self, chat_id: int, user_id: int, now: datetime) -> int:
         """Active Violations (§6): not revoked, and not yet expired."""
-        return await self.session.scalar(
-            select(func.count())
-            .select_from(Violation)
-            .where(
-                Violation.chat_id == chat_id,
-                Violation.user_id == user_id,
-                Violation.revoked_at.is_(None),
-                or_(Violation.expires_at.is_(None), Violation.expires_at > now),
+        return (
+            await self.session.scalar(
+                select(func.count())
+                .select_from(Violation)
+                .where(
+                    Violation.chat_id == chat_id,
+                    Violation.user_id == user_id,
+                    Violation.revoked_at.is_(None),
+                    or_(Violation.expires_at.is_(None), Violation.expires_at > now),
+                )
             )
-        ) or 0
+            or 0
+        )
 
     async def save_notice(
         self, violation_id: int, *, message_id: int, delete_at: datetime

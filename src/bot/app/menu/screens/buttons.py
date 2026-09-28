@@ -8,6 +8,8 @@ from app.menu.callbacks import ChatCallback, MenuAction, MenuCallback
 # Button styles (§13): at most one primary button per screen; on the language
 # screen the option matching the Telegram language_code is the primary one.
 PRIMARY = "primary"
+#: 🟢 success for confirming or safe actions (Save, Lift restriction, Enable).
+SUCCESS = "success"
 
 
 def button(

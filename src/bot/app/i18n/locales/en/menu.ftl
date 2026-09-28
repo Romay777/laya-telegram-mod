@@ -33,3 +33,7 @@ menu-link-problem-not-admin = You are not an admin of this chat.
 menu-link-check-again = 🔵 Check again
 menu-link-expired = The link has expired. Press 🔵 Add to chat on the Home screen to get a new one.
 menu-chat-access-lost = You are no longer an admin of this chat.
+
+menu-chat-settings = ⚙️ Settings
+menu-settings-enable-auto = 🟢 Enable auto-moderation
+menu-settings-observe = Switch to observation

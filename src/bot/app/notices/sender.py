@@ -58,7 +58,10 @@ def _duration_text(t: GetText, step_seconds: int) -> str:
 
 
 def removal_time(
-    now: datetime, *, restricted_until: datetime | None, max_lifetime_h: int = DEFAULT_MAX_LIFETIME_H
+    now: datetime,
+    *,
+    restricted_until: datetime | None,
+    max_lifetime_h: int = DEFAULT_MAX_LIFETIME_H,
 ) -> datetime:
     """When the notice deletes itself (§7): the Restriction's end, or the
     `max_lifetime_h` cap — the only timer a forever Restriction has."""

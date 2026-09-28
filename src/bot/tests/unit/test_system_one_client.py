@@ -9,9 +9,8 @@ import json
 
 import httpx
 import pytest
-
 from app.classifiers.client import SystemOneClient, SystemOneError, SystemOneTimeoutError
-from app.classifiers.spec import QUESTION_SPEC, LAYA_MODEL
+from app.classifiers.spec import LAYA_MODEL, QUESTION_SPEC
 
 from .system_one_fixtures import CLEAN_ANSWER, SPAM_ANSWER, assert_all_labels, without_label
 

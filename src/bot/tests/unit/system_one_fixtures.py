@@ -39,7 +39,10 @@ def without_label(answer: dict, label: str) -> dict:
     category = answer["answers"]["category"]
     broken = {
         "answers": {
-            "category": {key: (dict(value) if isinstance(value, dict) else value) for key, value in category.items()}
+            "category": {
+                key: (dict(value) if isinstance(value, dict) else value)
+                for key, value in category.items()
+            }
         }
     }
     broken["answers"]["category"]["probabilities"] = {

@@ -46,3 +46,15 @@ class ChatCallback(CallbackData, prefix="chat"):
     """A chat-scoped Menu callback (§13): open (and later manage) one chat."""
 
     chat_id: int
+
+
+class ChatSettingsCallback(CallbackData, prefix="chat-settings"):
+    """⚙️ Settings on the Chat screen (§13); this ticket's screen is Mode."""
+
+    chat_id: int
+
+
+class ChatModeCallback(CallbackData, prefix="chat-mode"):
+    """The Mode switch (§13): Observation Mode ↔ Auto-moderation."""
+
+    chat_id: int

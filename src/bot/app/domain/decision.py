@@ -8,8 +8,8 @@ chat's violation threshold is a Violation, everything else is left alone
 No Telegram, no DB, no I/O.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 #: The one label of the question spec that is never a Category.
 CLEAN = "clean"

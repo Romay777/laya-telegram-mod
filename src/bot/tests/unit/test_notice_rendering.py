@@ -6,9 +6,9 @@ the sentence.
 """
 
 import pytest
-
 from app.i18n import translator_for
 from app.notices.sender import render_notice
+
 from tests.support.i18n import started_core
 
 NAME = "Alice"
@@ -17,9 +17,7 @@ NAME = "Alice"
 async def test_the_default_notice_names_user_reason_and_duration() -> None:
     core = await started_core()
 
-    text = render_notice(
-        translator_for(core, "en"), name=NAME, category="spam", step_seconds=3600
-    )
+    text = render_notice(translator_for(core, "en"), name=NAME, category="spam", step_seconds=3600)
 
     assert text == (
         "Alice, it looks like your message looks like spam. You can't write here for 1 hour."
