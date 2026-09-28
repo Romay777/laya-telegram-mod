@@ -96,7 +96,7 @@ def build_dispatcher(
     i18n.setup(dispatcher)  # locale resolution runs after the DB middlewares
     dispatcher.include_router(create_private_router())
     dispatcher.include_router(create_linking_router())
-    dispatcher.include_router(create_alerts_router())
+    dispatcher.include_router(create_alerts_router(max_notice_lifetime_h=max_notice_lifetime_h))
     dispatcher.include_router(create_appeals_router(outcome_visible_s=outcome_visible_s))
     dispatcher.include_router(create_group_router())
     dispatcher["navigator"] = navigator

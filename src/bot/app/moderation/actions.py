@@ -15,8 +15,13 @@ from aiogram.types import ChatPermissions, Message
 
 async def delete_message(bot: Bot, message: Message) -> None:
     """Delete the message; if it is already gone, the pipeline continues (§6)."""
+    await delete_chat_message(bot, message.chat.id, message.message_id)
+
+
+async def delete_chat_message(bot: Bot, chat_id: int, message_id: int) -> None:
+    """Delete by ids; if it is already gone, the flow continues (§6)."""
     with contextlib.suppress(TelegramBadRequest):
-        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
 
 
 async def restrict_member(
