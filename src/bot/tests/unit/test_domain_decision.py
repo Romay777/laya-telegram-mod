@@ -1,9 +1,9 @@
 """Pure Decision rule (§4 step 8): the two-zone table over mode and thresholds.
 
-    | Mode              | p ≥ violation | suspicion ≤ p < violation | below   |
-    |-------------------|---------------|---------------------------|---------|
-    | Auto-moderation   | Violation     | Suspicion                 | nothing |
-    | Observation Mode  | Suspicion     | Suspicion                 | nothing |
+| Mode              | p ≥ violation | suspicion ≤ p < violation | below   |
+|-------------------|---------------|---------------------------|---------|
+| Auto-moderation   | Violation     | Suspicion                 | nothing |
+| Observation Mode  | Suspicion     | Suspicion                 | nothing |
 """
 
 import pytest

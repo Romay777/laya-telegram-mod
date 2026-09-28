@@ -2,7 +2,8 @@
 
 Admins (via the cached admin list) and bots are never checked. Short
 messages with no link, invite or @mention are skipped as `skipped_short`.
-In Observation Mode nothing is acted on at all.
+In Observation Mode messages are still checked and recorded, but nothing
+is ever acted on (ADR-0003).
 """
 
 from collections.abc import AsyncIterator, Iterator
@@ -131,17 +132,21 @@ async def test_a_link_keeps_a_short_message_in_the_pipeline(
     assert state["message"] == "join us https://t.me/+abc"
 
 
-async def test_in_observation_mode_nothing_is_acted_on_or_recorded(
+async def test_in_observation_mode_a_clean_message_is_recorded_and_left_alone(
     app: TestApp, admin_id: int, member_id: int, chat_id: int
 ) -> None:
     await linked_via_deeplink(app, admin_id, chat_id)  # every chat starts observing (§12)
+    app.backend.script(CLEAN)
     app.session.script(GetChatMember, member_member(user(member_id)))
 
     await app.feed(group_message_update(chat_id, member_id, SPAM_TEXT, message_id=94))
 
-    assert app.session.calls == []  # not even the admin check
-    assert app.backend.calls == []
-    assert await all_checks(app.session_maker) == []
+    # Checked and recorded, but never acted on: no deletion, no Restriction,
+    # no Chat Notice, no alert (ADR-0003; a flagged Verdict would become a
+    # Suspicion — that flow is test_suspicions.py's).
+    assert app.session.call_names() == ["GetChatMember"]
+    (check,) = await all_checks(app.session_maker)
+    assert check.outcome == "clean"
 
 
 async def test_a_message_in_an_unlinked_chat_is_ignored(

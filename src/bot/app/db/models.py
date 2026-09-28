@@ -184,9 +184,7 @@ class Suspicion(Base):
     __tablename__ = "suspicion"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    check_id: Mapped[int] = mapped_column(
-        ForeignKey("message_check.id", ondelete="CASCADE")
-    )
+    check_id: Mapped[int] = mapped_column(ForeignKey("message_check.id", ondelete="CASCADE"))
     chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(BigInteger)
     message_id: Mapped[int] = mapped_column(BigInteger)

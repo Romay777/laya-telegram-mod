@@ -184,7 +184,7 @@ async def test_the_suspicion_alert_link_offset_counts_utf16_units() -> None:
     # two UTF-16 code units.
     url = message_link(chat_id=-1004501234567, message_id=77)
 
-    text, entities = render_suspicion_alert(
+    _text, entities = render_suspicion_alert(
         translator_for(core, "en"),
         chat_title="Chat 🚀",
         member_name="Ann",
@@ -221,7 +221,7 @@ async def test_a_purged_suspicion_says_so_but_keeps_the_link() -> None:
     assert entities == [
         {
             "type": "text_link",
-            "offset": utf16(f"🔍 My Chat\nMember: Ann\nSpam, 70%\n"),
+            "offset": utf16("🔍 My Chat\nMember: Ann\nSpam, 70%\n"),
             "length": utf16(url),
             "url": url,
         }

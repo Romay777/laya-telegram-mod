@@ -24,6 +24,7 @@ from app.classifiers.spec import LAYA_MODEL, SPEC_VERSION
 from app.clock import Clock
 from app.db.models import Chat
 from app.db.repositories.moderation import ModerationRepository
+from app.db.repositories.suspicions import SuspicionRepository
 from app.domain.decision import decide
 from app.linking.admin_cache import AdminCache
 from app.moderation import signals
@@ -70,11 +71,13 @@ class ModerationPipeline:
         message: Message,
         admin_cache: AdminCache,
     ) -> None:
-        """Check one group message of a Linked Chat and act on a Violation (§4)."""
-        # Only chats in active status and Auto-moderation are acted on.
-        # A Suspended Chat checks nothing (§10); Observation Mode builds out
-        # in ticket #9, so until then nothing is recorded there either.
-        if chat.status != "active" or chat.mode != "auto":
+        """Check one group message of a Linked Chat and act on the Decision (§4).
+
+        A Suspended Chat checks nothing (§10). Both modes check and record:
+        Auto-moderation acts on Violations itself, while Observation Mode
+        turns every flagged Verdict into a Suspicion for the Admins (§4).
+        """
+        if chat.status != "active":
             return
 
         # §4 step 1: Exempt Senders are never checked, not even recorded.
@@ -135,6 +138,23 @@ class ModerationPipeline:
             probabilities=dict(outcome),
             latency_ms=latency_ms,
         )
+        if decision.outcome == "suspicion":
+            await self._raise_suspicion(
+                bot,
+                session,
+                repo,
+                chat=chat,
+                sender=sender,
+                message_id=message.message_id,
+                check_id=check.id,
+                text=text,
+                entities=entities,
+                category=decision.category,
+                confidence=decision.confidence,
+                now=now,
+                admin_cache=admin_cache,
+            )
+            return
         if decision.outcome != "violation":
             return
 
@@ -225,6 +245,57 @@ class ModerationPipeline:
             confidence=confidence,
             probabilities=probabilities,
             latency_ms=latency_ms,
+        )
+
+    async def _raise_suspicion(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        repo: ModerationRepository,
+        *,
+        chat: Chat,
+        sender: Any,
+        message_id: int,
+        check_id: int,
+        text: str,
+        entities: list[dict[str, Any]],
+        category: str,
+        confidence: float,
+        now: datetime,
+        admin_cache: AdminCache,
+    ) -> None:
+        """The middle band — or anything flagged in Observation Mode (§4, §9).
+
+        The message stays in the chat; its text is kept for the alert and
+        the later decision, and the Admins subscribed with `all` are asked
+        to 🔴 Punish or Dismiss.
+        """
+        # §4 step 9: the flagged message keeps its text until the retention passes.
+        await repo.store_flagged(
+            check_id,
+            text=text,
+            entities=entities,
+            purge_at=now + timedelta(days=self._flagged_text_days),
+        )
+        suspicion = await SuspicionRepository(session).create(
+            check_id=check_id,
+            chat_id=chat.chat_id,
+            user_id=sender.id,
+            message_id=message_id,
+            created_at=now,
+        )
+        await self._fanout.suspicion_alert(
+            bot,
+            session,
+            admin_cache=admin_cache,
+            chat=chat,
+            member_name=sender.first_name or str(sender.id),
+            category=category,
+            confidence=confidence,
+            suspicion_id=suspicion.id,
+            message_id=message_id,
+            flagged_text=text,
+            flagged_entities=entities,
         )
 
     def _violation_threshold(self, chat: Chat) -> float:

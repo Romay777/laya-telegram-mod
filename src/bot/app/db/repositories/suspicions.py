@@ -42,9 +42,7 @@ class SuspicionRepository:
     async def get(self, suspicion_id: int) -> Suspicion | None:
         return await self.session.get(Suspicion, suspicion_id)
 
-    async def decide(
-        self, suspicion_id: int, *, status: str, by: int | None, at: datetime
-    ) -> bool:
+    async def decide(self, suspicion_id: int, *, status: str, by: int | None, at: datetime) -> bool:
         """Apply one decision press; `False` when somebody was faster (§9).
 
         `by=None` is the scheduler's auto-close: the Suspicion expires

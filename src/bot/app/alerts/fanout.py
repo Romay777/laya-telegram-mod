@@ -20,7 +20,12 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, MessageEnt
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.alerts.rendering import render_appeal_alert, render_violation_alert
+from app.alerts.rendering import (
+    message_link,
+    render_appeal_alert,
+    render_suspicion_alert,
+    render_violation_alert,
+)
 from app.clock import Clock
 from app.db.models import BotUser, Chat
 from app.db.repositories.alerts import AlertRepository
@@ -28,7 +33,11 @@ from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.db.repositories.users import BotUserRepository
 from app.i18n import GetText, translator_for
 from app.linking.admin_cache import AdminCache
-from app.menu.callbacks import AppealDecideCallback, LiftRestrictionCallback
+from app.menu.callbacks import (
+    AppealDecideCallback,
+    LiftRestrictionCallback,
+    SuspicionDecideCallback,
+)
 from app.menu.screens.buttons import DANGER, SUCCESS
 
 #: The private-chat limit: about one message per second per Admin (§9).
@@ -76,6 +85,29 @@ def appeal_keyboard(t: GetText, chat_id: int, appeal_id: int) -> InlineKeyboardM
                         chat_id=chat_id, appeal_id=appeal_id, approve=False
                     ).pack(),
                     style=DANGER,
+                ),
+            ]
+        ]
+    )
+
+
+def suspicion_keyboard(t: GetText, chat_id: int, suspicion_id: int) -> InlineKeyboardMarkup:
+    """The two decision buttons of a Suspicion alert (§9): 🔴 Punish · Dismiss."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("alert-punish-button"),
+                    callback_data=SuspicionDecideCallback(
+                        chat_id=chat_id, suspicion_id=suspicion_id, punish=True
+                    ).pack(),
+                    style=DANGER,
+                ),
+                InlineKeyboardButton(
+                    text=t("alert-dismiss-button"),
+                    callback_data=SuspicionDecideCallback(
+                        chat_id=chat_id, suspicion_id=suspicion_id, punish=False
+                    ).pack(),
                 ),
             ]
         ]
@@ -185,6 +217,56 @@ class AlertFanout:
                 markup=appeal_keyboard(t, chat.chat_id, appeal_id),
                 subject_type="appeal",
                 subject_id=appeal_id,
+            )
+
+    async def suspicion_alert(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        member_name: str,
+        category: str,
+        confidence: float,
+        suspicion_id: int,
+        message_id: int,
+        flagged_text: str | None,
+        flagged_entities: list[dict[str, Any]] | None,
+    ) -> None:
+        """Send the Suspicion alert to every Admin whose mode is `all` (§9).
+
+        The message stays in the chat, so the alert links to it; the 🔴
+        Punish and Dismiss buttons let the first Admin decide.
+        """
+        recipients = await AdminSubscriptionRepository(session).user_ids_with_mode(
+            chat.chat_id, alert_mode="all"
+        )
+        url = message_link(chat.chat_id, message_id)
+        async for admin_id, _user, t in self._recipients(
+            bot, session, admin_cache, chat, recipients
+        ):
+            text, entities = render_suspicion_alert(
+                t,
+                chat_title=chat.title or str(chat.chat_id),
+                member_name=member_name,
+                category=category,
+                confidence=confidence,
+                url=url,
+                flagged_text=flagged_text,
+                flagged_entities=flagged_entities,
+            )
+            await self._send_alert(
+                bot,
+                session,
+                chat=chat,
+                admin_id=admin_id,
+                t=t,
+                text=text,
+                entities=entities,
+                markup=suspicion_keyboard(t, chat.chat_id, suspicion_id),
+                subject_type="suspicion",
+                subject_id=suspicion_id,
             )
 
     async def _send_alert(

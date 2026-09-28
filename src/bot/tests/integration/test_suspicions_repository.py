@@ -106,10 +106,10 @@ async def test_auto_close_only_touches_pending_suspicions(db_session: AsyncSessi
         decided.id, status="dismissed", by=7, at=clock.now()
     )
 
-    # One day later: only the pending row is due (§11).
+    # One day later: none of this chat's rows is pending any more (§11).
     later = clock.now() + timedelta(hours=24)
     due = await SuspicionRepository(db_session).due(later, auto_close_h=24)
-    assert due == []
+    assert [row.id for row in due if row.chat_id == chat.chat_id] == []
 
 
 async def test_a_pending_suspicion_is_due_after_auto_close_h(db_session: AsyncSession) -> None:
@@ -120,10 +120,12 @@ async def test_a_pending_suspicion_is_due_after_auto_close_h(db_session: AsyncSe
 
     # A minute before `auto_close_h` nothing is due; at the mark it is (§11).
     early = clock.now() + timedelta(hours=24) - timedelta(minutes=1)
-    assert await repo.due(early, auto_close_h=24) == []
+    assert [
+        row.id for row in await repo.due(early, auto_close_h=24) if row.chat_id == chat.chat_id
+    ] == []
 
     due = await repo.due(clock.now() + timedelta(hours=24), auto_close_h=24)
-    assert [row.id for row in due] == [suspicion.id]
+    assert [row.id for row in due if row.chat_id == chat.chat_id] == [suspicion.id]
 
 
 async def test_summary_counts_cover_the_window_and_the_punisher(

@@ -102,3 +102,15 @@ class AppealDecideCallback(CallbackData, prefix="appeal-decide"):
     chat_id: int
     appeal_id: int
     approve: bool
+
+
+class SuspicionDecideCallback(CallbackData, prefix="suspicion-decide"):
+    """🔴 Punish / Dismiss on a Suspicion's Admin Alert copy (§9).
+
+    Carries the `chat_id` so the handler can re-check Admin access (§13);
+    the first Admin to press decides (§9).
+    """
+
+    chat_id: int
+    suspicion_id: int
+    punish: bool
