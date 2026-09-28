@@ -23,6 +23,7 @@ from app.menu.navigator import MenuNavigator
 from app.moderation.pipeline import ModerationPipeline, Thresholds
 from app.scheduler import Scheduler
 from app.telegram.handlers.alerts import create_alerts_router
+from app.telegram.handlers.appeals import create_appeals_router
 from app.telegram.handlers.group import create_group_router
 from app.telegram.handlers.linking import create_linking_router
 from app.telegram.handlers.private import create_private_router
@@ -67,6 +68,7 @@ def build_dispatcher(
     min_words: int = 3,
     flagged_text_days: int = 30,
     max_notice_lifetime_h: int = 24,
+    outcome_visible_s: int = 600,
     alerts_pace_s: float = 1.0,
 ) -> Dispatcher:
     navigator = MenuNavigator(core=i18n.core)
@@ -95,11 +97,13 @@ def build_dispatcher(
     dispatcher.include_router(create_private_router())
     dispatcher.include_router(create_linking_router())
     dispatcher.include_router(create_alerts_router())
+    dispatcher.include_router(create_appeals_router(outcome_visible_s=outcome_visible_s))
     dispatcher.include_router(create_group_router())
     dispatcher["navigator"] = navigator
     dispatcher["clock"] = clock
     dispatcher["linking"] = linking
     dispatcher["admin_cache"] = admin_cache
+    dispatcher["fanout"] = fanout
     dispatcher["pipeline"] = pipeline
     return dispatcher
 
@@ -132,6 +136,7 @@ async def run() -> None:
         min_words=settings.moderation.min_words,
         flagged_text_days=settings.retention.flagged_text_days,
         max_notice_lifetime_h=settings.notices.max_lifetime_h,
+        outcome_visible_s=settings.notices.outcome_visible_s,
         alerts_pace_s=settings.alerts.pace_s,
     )
     bot = build_bot(settings.bot_token)

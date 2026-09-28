@@ -112,6 +112,38 @@ def private_callback_update(
     )
 
 
+def group_callback_update(
+    user_id: int,
+    data: str,
+    *,
+    chat_id: int,
+    message_id: int,
+    sender_name: str = "Member",
+    username: str | None = None,
+) -> Update:
+    """A callback press on an inline keyboard inside a Linked Chat.
+
+    The Appeal button under a Chat Notice is the one such keyboard; the
+    `message` on the callback is the bot's own notice (§7, §8).
+    """
+    return Update(
+        update_id=0,
+        callback_query=CallbackQuery(
+            id="cb1",
+            from_user=User(id=user_id, is_bot=False, first_name=sender_name, username=username),
+            chat_instance="test-instance",
+            message=Message(
+                message_id=message_id,
+                date=datetime.now(UTC),
+                chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+                from_user=BOT_USER,
+                text="notice text",
+            ),
+            data=data,
+        ),
+    )
+
+
 def group_message_update(
     chat_id: int,
     sender_id: int,

@@ -17,7 +17,28 @@ def utf16_len(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
-def render_violation_alert(
+def _quoted_alert(
+    t: GetText,
+    header: str,
+    flagged_text: str | None,
+    flagged_entities: list[dict[str, Any]] | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Append the deleted message as a `blockquote` quote, entities kept (§9).
+
+    The stored entities shift past the header by UTF-16 code units, the
+    offsets Telegram counts. When the stored text has been purged, the alert
+    says so instead (§8).
+    """
+    if flagged_text is None:
+        return f"{header}\n\n{t('alert-text-not-stored')}", []
+
+    shift = utf16_len(header) + 2  # the blank line between header and quote
+    shifted = [{**entity, "offset": entity["offset"] + shift} for entity in flagged_entities]
+    quote = {"type": "blockquote", "offset": shift, "length": utf16_len(flagged_text)}
+    return f"{header}\n\n{flagged_text}", [*shifted, quote]
+
+
+def _facts_header(
     t: GetText,
     *,
     chat_title: str,
@@ -25,16 +46,9 @@ def render_violation_alert(
     category: str,
     confidence: float,
     step_seconds: int,
-    flagged_text: str | None,
-    flagged_entities: list[dict[str, Any]] | None,
-) -> tuple[str, list[dict[str, Any]]]:
-    """The Violation alert: chat, Member, Category, confidence, Step, quote (§9).
-
-    Returns the text and the entities to send: the stored entities of the
-    deleted message, shifted past the header, plus a `blockquote` over the
-    quote. When the stored text has been purged, the alert says so (§8).
-    """
-    header = "\n".join(
+) -> str:
+    """The facts both alert kinds open with: chat, Member, Verdict, Step (§9)."""
+    return "\n".join(
         [
             t("alert-violation-header", chat=chat_title),
             t("alert-violation-member", member=member_name),
@@ -46,10 +60,58 @@ def render_violation_alert(
             t("alert-violation-step", duration=duration_text(t, step_seconds)),
         ]
     )
-    if flagged_text is None:
-        return f"{header}\n\n{t('alert-text-not-stored')}", []
 
-    shift = utf16_len(header) + 2  # the blank line between header and quote
-    shifted = [{**entity, "offset": entity["offset"] + shift} for entity in flagged_entities]
-    quote = {"type": "blockquote", "offset": shift, "length": utf16_len(flagged_text)}
-    return f"{header}\n\n{flagged_text}", [*shifted, quote]
+
+def render_violation_alert(
+    t: GetText,
+    *,
+    chat_title: str,
+    member_name: str,
+    category: str,
+    confidence: float,
+    step_seconds: int,
+    flagged_text: str | None,
+    flagged_entities: list[dict[str, Any]] | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """The Violation alert: chat, Member, Category, confidence, Step, quote (§9)."""
+    header = _facts_header(
+        t,
+        chat_title=chat_title,
+        member_name=member_name,
+        category=category,
+        confidence=confidence,
+        step_seconds=step_seconds,
+    )
+    return _quoted_alert(t, header, flagged_text, flagged_entities)
+
+
+def render_appeal_alert(
+    t: GetText,
+    *,
+    chat_title: str,
+    member_name: str,
+    category: str,
+    confidence: float,
+    step_seconds: int,
+    flagged_text: str | None,
+    flagged_entities: list[dict[str, Any]] | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """The Appeal alert (§8): the Violation's facts, the appeal line, the quote.
+
+    The deleted message is quoted with `blockquote` formatting over its
+    stored entities; purged text renders the no-longer-stored line instead.
+    """
+    header = "\n".join(
+        [
+            _facts_header(
+                t,
+                chat_title=chat_title,
+                member_name=member_name,
+                category=category,
+                confidence=confidence,
+                step_seconds=step_seconds,
+            ),
+            t("alert-appeal-line"),
+        ]
+    )
+    return _quoted_alert(t, header, flagged_text, flagged_entities)

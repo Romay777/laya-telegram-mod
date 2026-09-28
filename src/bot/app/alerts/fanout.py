@@ -19,7 +19,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, MessageEnt
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.alerts.rendering import render_violation_alert
+from app.alerts.rendering import render_appeal_alert, render_violation_alert
 from app.clock import Clock
 from app.db.models import BotUser, Chat
 from app.db.repositories.alerts import AlertRepository
@@ -27,8 +27,8 @@ from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.db.repositories.users import BotUserRepository
 from app.i18n import GetText, translator_for
 from app.linking.admin_cache import AdminCache
-from app.menu.callbacks import LiftRestrictionCallback
-from app.menu.screens.buttons import SUCCESS
+from app.menu.callbacks import AppealDecideCallback, LiftRestrictionCallback
+from app.menu.screens.buttons import DANGER, SUCCESS
 
 #: The private-chat limit: about one message per second per Admin (§9).
 PACE_S = 1.0
@@ -52,6 +52,30 @@ def lift_keyboard(t: GetText, chat_id: int, violation_id: int) -> InlineKeyboard
                     ).pack(),
                     style=SUCCESS,
                 )
+            ]
+        ]
+    )
+
+
+def appeal_keyboard(t: GetText, chat_id: int, appeal_id: int) -> InlineKeyboardMarkup:
+    """The two decision buttons of an Appeal alert (§8): 🟢 Lift, 🔴 Reject."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("alert-lift-button"),
+                    callback_data=AppealDecideCallback(
+                        chat_id=chat_id, appeal_id=appeal_id, approve=True
+                    ).pack(),
+                    style=SUCCESS,
+                ),
+                InlineKeyboardButton(
+                    text=t("alert-reject-button"),
+                    callback_data=AppealDecideCallback(
+                        chat_id=chat_id, appeal_id=appeal_id, approve=False
+                    ).pack(),
+                    style=DANGER,
+                ),
             ]
         ]
     )
@@ -91,7 +115,7 @@ class AlertFanout:
         recipients = await AdminSubscriptionRepository(session).user_ids_with_mode(
             chat.chat_id, alert_mode="all"
         )
-        async for admin_id, user, t in self._recipients(
+        async for admin_id, _user, t in self._recipients(
             bot, session, admin_cache, chat, recipients
         ):
             await self._pace_for(admin_id)
@@ -123,6 +147,59 @@ class AlertFanout:
                 message_id=message.message_id,
                 subject_type="violation",
                 subject_id=violation_id,
+            )
+
+    async def appeal_alert(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        member_name: str,
+        category: str,
+        confidence: float,
+        step_seconds: int,
+        flagged_text: str | None,
+        flagged_entities: list[dict[str, Any]] | None,
+        appeal_id: int,
+    ) -> None:
+        """Send the Appeal alert to every Admin whose mode includes Appeals (§8, §9)."""
+        subscribers = await AdminSubscriptionRepository(session).user_ids_with_modes(
+            chat.chat_id, modes=APPEAL_MODES
+        )
+        async for admin_id, _user, t in self._recipients(
+            bot, session, admin_cache, chat, subscribers
+        ):
+            await self._pace_for(admin_id)
+            text, entities = render_appeal_alert(
+                t,
+                chat_title=chat.title or str(chat.chat_id),
+                member_name=member_name,
+                category=category,
+                confidence=confidence,
+                step_seconds=step_seconds,
+                flagged_text=flagged_text,
+                flagged_entities=flagged_entities,
+            )
+            try:
+                message = await bot.send_message(
+                    chat_id=admin_id,
+                    text=text,
+                    entities=[MessageEntity.model_validate(entity) for entity in entities],
+                    reply_markup=appeal_keyboard(t, chat.chat_id, appeal_id),
+                )
+            except TelegramForbiddenError:
+                await BotUserRepository(session).mark_unreachable(
+                    admin_id, started_at=self._clock.now()
+                )
+                continue
+            await AlertRepository(session).record_alert(
+                chat.chat_id,
+                admin_id=admin_id,
+                message_id=message.message_id,
+                subject_type="appeal",
+                subject_id=appeal_id,
             )
 
     async def has_appeal_recipient(

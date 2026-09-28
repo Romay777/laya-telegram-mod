@@ -9,3 +9,6 @@ alert-text-not-stored = The message text is no longer stored.
 alert-lift-button = 🟢 Lift restriction
 alert-lifted = ✅ Restriction lifted by {$admin}
 alert-already-decided = Already decided by {$admin}
+alert-appeal-line = 🙋 The Member has appealed
+alert-reject-button = 🔴 Reject
+alert-appeal-rejected = ❌ Appeal rejected by {$admin}

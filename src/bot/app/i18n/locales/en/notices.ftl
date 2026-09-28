@@ -16,3 +16,9 @@ notice-duration-days = {$days ->
    *[other] {$days} days
 }
 notice-appeal-button = 🙋 It's a mistake
+notice-appeal-sent = ⏳ Appeal sent to admins
+notice-appeal-approved = ✅ Restriction lifted by an admin
+notice-appeal-rejected = ❌ Appeal rejected
+notice-appeal-not-for-you = This button isn't for you
+notice-appeal-already-sent = Already sent
+notice-appeal-too-late = The restriction has already been lifted

@@ -23,7 +23,8 @@ class AppealRepository:
     async def create(self, violation_id: int, *, created_at: datetime) -> Appeal | None:
         """File the first Appeal for the Violation; None when one already exists."""
         result = await self.session.execute(
-            insert(Appeal).values(violation_id=violation_id, created_at=created_at)
+            insert(Appeal)
+            .values(violation_id=violation_id, created_at=created_at)
             .on_conflict_do_nothing(index_elements=["violation_id"])
             .returning(Appeal.id)
         )
@@ -35,13 +36,9 @@ class AppealRepository:
 
     async def by_violation(self, violation_id: int) -> Appeal | None:
         """The Violation's Appeal, whatever its state."""
-        return await self.session.scalar(
-            select(Appeal).where(Appeal.violation_id == violation_id)
-        )
+        return await self.session.scalar(select(Appeal).where(Appeal.violation_id == violation_id))
 
-    async def decide(
-        self, appeal_id: int, *, status: str, by: int, at: datetime
-    ) -> bool:
+    async def decide(self, appeal_id: int, *, status: str, by: int, at: datetime) -> bool:
         """Decide a pending Appeal (§8): the first click wins (§9).
 
         The conditional update fires only while the Appeal is still pending,

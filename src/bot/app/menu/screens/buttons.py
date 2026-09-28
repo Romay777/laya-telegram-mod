@@ -10,6 +10,8 @@ from app.menu.callbacks import ChatCallback, MenuAction, MenuCallback
 PRIMARY = "primary"
 #: 🟢 success for confirming or safe actions (Save, Lift restriction, Enable).
 SUCCESS = "success"
+#: 🔴 danger for punishing or destructive actions (Punish, Reject, Reset).
+DANGER = "danger"
 
 
 def button(

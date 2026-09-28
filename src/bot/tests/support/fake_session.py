@@ -14,6 +14,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
     AnswerCallbackQuery,
     DeleteMessage,
+    EditMessageReplyMarkup,
     EditMessageText,
     GetMe,
     GetUpdates,
@@ -80,7 +81,9 @@ class FakeBotSession(BaseSession):
                 if isinstance(method.chat_id, Chat)
                 else Chat(id=method.chat_id, type="private"),
             )
-        if isinstance(method, EditMessageText | DeleteMessage | AnswerCallbackQuery):
+        if isinstance(
+            method, EditMessageText | EditMessageReplyMarkup | DeleteMessage | AnswerCallbackQuery
+        ):
             return True
         if isinstance(method, RestrictChatMember):
             return True

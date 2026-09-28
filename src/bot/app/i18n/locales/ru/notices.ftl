@@ -22,3 +22,9 @@ notice-duration-days = {$days ->
    *[other] {$days} дня
 }
 notice-appeal-button = 🙋 Это ошибка
+notice-appeal-sent = ⏳ Апелляция отправлена администраторам
+notice-appeal-approved = ✅ Ограничение снял администратор
+notice-appeal-rejected = ❌ Апелляция отклонена
+notice-appeal-not-for-you = Эта кнопка не для вас
+notice-appeal-already-sent = Уже отправлено
+notice-appeal-too-late = Ограничение уже снято

@@ -58,9 +58,7 @@ def appeal_keyboard(t: GetText, *, chat_id: int, violation_id: int) -> InlineKey
             [
                 InlineKeyboardButton(
                     text=t("notice-appeal-button"),
-                    callback_data=AppealCallback(
-                        chat_id=chat_id, violation_id=violation_id
-                    ).pack(),
+                    callback_data=AppealCallback(chat_id=chat_id, violation_id=violation_id).pack(),
                 )
             ]
         ]

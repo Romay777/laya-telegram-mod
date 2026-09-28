@@ -82,9 +82,7 @@ async def test_the_first_decision_wins_and_a_late_one_changes_nothing(
     appeal = await repo.create(violation.id, created_at=clock.now())
     assert appeal is not None
 
-    assert (
-        await repo.decide(appeal.id, status="approved", by=11, at=clock.now()) is True
-    )
+    assert await repo.decide(appeal.id, status="approved", by=11, at=clock.now()) is True
 
     later = clock.now() + timedelta(minutes=5)
     # A late click decides nothing: first click wins (§9).
@@ -107,8 +105,6 @@ async def test_appeal_recipients_cover_both_appealing_modes(
     await subs.set_mode(chat.chat_id, user_id=52, alert_mode="appeals")
     await subs.set_mode(chat.chat_id, user_id=53, alert_mode="off")
 
-    recipients = await subs.user_ids_with_modes(
-        chat.chat_id, modes=("all", "appeals")
-    )
+    recipients = await subs.user_ids_with_modes(chat.chat_id, modes=("all", "appeals"))
 
     assert recipients == [51, 52]
