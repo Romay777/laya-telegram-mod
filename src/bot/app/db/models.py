@@ -122,6 +122,27 @@ class ChatCategory(Base):
     suspicion_threshold: Mapped[float | None] = mapped_column(Float)
 
 
+class NoticeTemplate(Base):
+    """The chat's Notice Template (§14, §12): at most one per chat.
+
+    `text` and `entities` are the Admin's message as received — bold,
+    italic, underline, strikethrough, spoiler, code, pre, links, blockquote
+    and expandable blockquote survive; `custom_emoji` is stripped at input.
+    Without a row the default text in the Chat Language applies (§7).
+    """
+
+    __tablename__ = "notice_template"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"), primary_key=True
+    )
+    text: Mapped[str] = mapped_column(Text)
+    # Telegram MessageEntity[], as received.
+    entities: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AdminSubscription(Base):
     """Which Admin Alerts an Admin receives for one chat (§9)."""
 
