@@ -5,16 +5,18 @@ storage, i18n, handlers); the only fakes are the Bot API session, which
 records every outgoing call, the Clock, and the classifier backend (§17).
 """
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot, Dispatcher
 from aiogram.methods import GetChatMember
 from aiogram_i18n import I18nMiddleware
 from app.clock import FakeClock
 from app.main import build_dispatcher, build_i18n_middleware
+from app.notices.queue import NoticeQueue
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -49,6 +51,7 @@ class TestApp:
     clock: FakeClock
     backend: FakeBackend
     i18n: I18nMiddleware
+    notices: NoticeQueue
     _update_id: int = 0
 
     async def feed(self, update: Update) -> None:
@@ -69,6 +72,10 @@ async def build_app(
     *,
     prompt_delete_after_s: float = 600.0,
     backend: FakeBackend | None = None,
+    notices_per_second: float = 1,
+    notices_per_minute: int = 18,
+    max_queue_age_s: int = 300,
+    notices_gate: asyncio.Event | None = None,
 ) -> TestApp:
     i18n = build_i18n_middleware()
     await i18n.core.startup()  # the Dispatcher's startup hook does this in production
@@ -77,6 +84,15 @@ async def build_app(
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     clock = FakeClock(FIXED_NOW)
     classifier = backend if backend is not None else FakeBackend()
+    # The queue's waiting moves the FakeClock, so the e2e tests see the
+    # paced schedule the way production lives it — just instantly (§17).
+    notice_queue = NoticeQueue(
+        clock=clock,
+        per_second=notices_per_second,
+        per_minute=notices_per_minute,
+        max_queue_age_s=max_queue_age_s,
+        sleep=_clock_moving_sleep(clock, notices_gate),
+    )
     dispatcher = build_dispatcher(
         session_maker=session_maker,
         i18n=i18n,
@@ -85,6 +101,7 @@ async def build_app(
         # group prompt actually deletes inside the test.
         prompt_delete_after_s=prompt_delete_after_s,
         classifier=classifier,
+        notices=notice_queue,
         # The default pace is one alert per second per Admin (§9); tests
         # must not wait on it.
         alerts_pace_s=0.0,
@@ -101,7 +118,22 @@ async def build_app(
         clock=clock,
         backend=classifier,
         i18n=i18n,
+        notices=notice_queue,
     )
+
+
+def _clock_moving_sleep(
+    clock: FakeClock, gate: asyncio.Event | None = None
+) -> Callable[[float], Awaitable[None]]:
+    async def sleep(delay: float) -> None:
+        # A gate holds the queue's pace until the test says go: feeding the
+        # raid then finishes before any wait is slept out, the way it does
+        # when the waits are real seconds (§17).
+        if gate is not None:
+            await gate.wait()
+        clock.advance(timedelta(seconds=delay))
+
+    return sleep
 
 
 @asynccontextmanager
@@ -110,9 +142,19 @@ async def app_fixture(
     *,
     prompt_delete_after_s: float = 600.0,
     backend: FakeBackend | None = None,
+    notices_per_second: float = 1,
+    notices_per_minute: int = 18,
+    max_queue_age_s: int = 300,
+    notices_gate: asyncio.Event | None = None,
 ) -> AsyncIterator[TestApp]:
     app = await build_app(
-        postgres_url, prompt_delete_after_s=prompt_delete_after_s, backend=backend
+        postgres_url,
+        prompt_delete_after_s=prompt_delete_after_s,
+        backend=backend,
+        notices_per_second=notices_per_second,
+        notices_per_minute=notices_per_minute,
+        max_queue_age_s=max_queue_age_s,
+        notices_gate=notices_gate,
     )
     try:
         yield app

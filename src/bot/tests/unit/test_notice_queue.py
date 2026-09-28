@@ -13,7 +13,6 @@ from itertools import count
 from typing import Any
 
 from aiogram.types import Chat, Message
-
 from app.clock import FakeClock
 from app.notices.queue import NoticeQueue, PendingNotice
 
