@@ -2,7 +2,7 @@
 
 Everything downstream of the Dispatcher is the real app (Postgres FSM
 storage, i18n, handlers); the only fakes are the Bot API session, which
-records every outgoing call, and the Clock (§17).
+records every outgoing call, the Clock, and the classifier backend (§17).
 """
 
 from collections.abc import AsyncIterator
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from aiogram import Bot, Dispatcher
+from aiogram.methods import GetChatMember
 from app.clock import FakeClock
 from app.main import build_dispatcher, build_i18n_middleware
 from sqlalchemy.ext.asyncio import (
@@ -20,8 +21,16 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from tests.support.backend import FakeBackend
 from tests.support.fake_session import FakeBotSession
-from tests.support.updates import Update
+from tests.support.telegram import member_owner
+from tests.support.updates import (
+    Update,
+    my_chat_member_update,
+    private_callback_update,
+    start_update,
+    user,
+)
 
 TEST_BOT_TOKEN = "42:test-token"
 FIXED_NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -37,6 +46,7 @@ class TestApp:
     session_maker: async_sessionmaker[AsyncSession]
     engine: AsyncEngine
     clock: FakeClock
+    backend: FakeBackend
     _update_id: int = 0
 
     async def feed(self, update: Update) -> None:
@@ -52,13 +62,19 @@ class TestApp:
         await self.engine.dispose()
 
 
-async def build_app(postgres_url: str, *, prompt_delete_after_s: float = 600.0) -> TestApp:
+async def build_app(
+    postgres_url: str,
+    *,
+    prompt_delete_after_s: float = 600.0,
+    backend: FakeBackend | None = None,
+) -> TestApp:
     i18n = build_i18n_middleware()
     await i18n.core.startup()  # the Dispatcher's startup hook does this in production
 
     engine = create_async_engine(postgres_url)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     clock = FakeClock(FIXED_NOW)
+    classifier = backend if backend is not None else FakeBackend()
     dispatcher = build_dispatcher(
         session_maker=session_maker,
         i18n=i18n,
@@ -66,6 +82,7 @@ async def build_app(postgres_url: str, *, prompt_delete_after_s: float = 600.0) 
         # The default is 600 s (§10); tests shrink it so the self-deleting
         # group prompt actually deletes inside the test.
         prompt_delete_after_s=prompt_delete_after_s,
+        classifier=classifier,
     )
 
     session = FakeBotSession()
@@ -77,15 +94,47 @@ async def build_app(postgres_url: str, *, prompt_delete_after_s: float = 600.0) 
         session_maker=session_maker,
         engine=engine,
         clock=clock,
+        backend=classifier,
     )
 
 
 @asynccontextmanager
 async def app_fixture(
-    postgres_url: str, *, prompt_delete_after_s: float = 600.0
+    postgres_url: str,
+    *,
+    prompt_delete_after_s: float = 600.0,
+    backend: FakeBackend | None = None,
 ) -> AsyncIterator[TestApp]:
-    app = await build_app(postgres_url, prompt_delete_after_s=prompt_delete_after_s)
+    app = await build_app(
+        postgres_url, prompt_delete_after_s=prompt_delete_after_s, backend=backend
+    )
     try:
         yield app
     finally:
         await app.aclose()
+
+
+async def started_admin(app: TestApp, admin_id: int) -> int:
+    """/start with the language picked; returns the Admin's Menu message id."""
+    await app.feed(start_update(admin_id, "en"))
+    menu_message_id = app.session.calls_of("SendMessage")[0].result.message_id
+    await app.feed(
+        private_callback_update(
+            admin_id, "menu:set-language:en", menu_message_id, language_code="en"
+        )
+    )
+    return menu_message_id
+
+
+async def linked_via_deeplink(
+    app: TestApp, admin_id: int, chat_id: int, title: str = "My Chat"
+) -> int:
+    """Add to chat → the promotion update; returns the Admin's Menu message id."""
+    menu_message_id = await started_admin(app, admin_id)
+    await app.feed(
+        private_callback_update(admin_id, "menu:add-to-chat:", menu_message_id, language_code="en")
+    )
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title=title))
+    app.session.calls.clear()
+    return menu_message_id

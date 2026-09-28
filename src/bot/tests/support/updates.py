@@ -9,6 +9,7 @@ from aiogram.types import (
     ChatMemberMember,
     ChatMemberUpdated,
     Message,
+    MessageEntity,
     MessageOriginChat,
     Update,
     User,
@@ -104,6 +105,30 @@ def private_callback_update(
             chat_instance="test-instance",
             message=_private_chat_message(user_id, message_id, language_code),
             data=data,
+        ),
+    )
+
+
+def group_message_update(
+    chat_id: int,
+    sender_id: int,
+    text: str,
+    *,
+    message_id: int,
+    sender_name: str = "Member",
+    from_bot: bool = False,
+    entities: list[MessageEntity] | None = None,
+) -> Update:
+    """A text message from a Member of a Linked Chat (or from a bot in it)."""
+    return Update(
+        update_id=0,
+        message=Message(
+            message_id=message_id,
+            date=datetime.now(UTC),
+            chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            from_user=User(id=sender_id, is_bot=from_bot, first_name=sender_name),
+            text=text,
+            entities=entities,
         ),
     )
 

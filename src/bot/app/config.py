@@ -36,6 +36,20 @@ class SensitivityThresholds:
     suspicion: float
 
 
+def default_thresholds() -> dict[str, dict[str, SensitivityThresholds]]:
+    """The §3 starting thresholds for every backend and Sensitivity."""
+    return {
+        backend: {
+            sensitivity: SensitivityThresholds(
+                violation=_DEFAULT_THRESHOLDS[(sensitivity, "violation")],
+                suspicion=_DEFAULT_THRESHOLDS[(sensitivity, "suspicion")],
+            )
+            for sensitivity in SENSITIVITIES
+        }
+        for backend in BACKENDS
+    }
+
+
 @dataclass(frozen=True)
 class SignalsSettings:
     """Cheap deterministic adjustments to both thresholds (§3), clamped later."""

@@ -17,6 +17,7 @@ from aiogram.methods import (
     EditMessageText,
     GetMe,
     GetUpdates,
+    RestrictChatMember,
     SendMessage,
 )
 from aiogram.methods.base import TelegramMethod
@@ -80,6 +81,8 @@ class FakeBotSession(BaseSession):
                 else Chat(id=method.chat_id, type="private"),
             )
         if isinstance(method, EditMessageText | DeleteMessage | AnswerCallbackQuery):
+            return True
+        if isinstance(method, RestrictChatMember):
             return True
         if isinstance(method, GetMe):
             return User(
