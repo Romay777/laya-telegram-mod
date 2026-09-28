@@ -60,6 +60,39 @@ class ChatModeCallback(CallbackData, prefix="chat-mode"):
     chat_id: int
 
 
+class CategoriesCallback(CallbackData, prefix="chat-categories"):
+    """The Categories screen (§13) of one chat.
+
+    `code` is None when the screen is merely opened; otherwise it names the
+    Category the Admin just toggled: `spam`, `ads` or `insult`.
+    """
+
+    chat_id: int
+    code: str | None = None
+
+
+class SensitivityCallback(CallbackData, prefix="chat-sensitivity"):
+    """The Sensitivity screen (§13) of one chat.
+
+    `level` is None when the screen is merely opened; otherwise it names the
+    Sensitivity the Admin just picked: `lenient`, `balanced` or `strict`.
+    """
+
+    chat_id: int
+    level: str | None = None
+
+
+class ChatLanguageCallback(CallbackData, prefix="chat-language"):
+    """The Chat Language screen (§15, §13) of one chat.
+
+    `code` is None when the screen is merely opened; otherwise it names the
+    language the Admin just picked: `ru` or `en`.
+    """
+
+    chat_id: int
+    code: str | None = None
+
+
 class EnableAutoCallback(CallbackData, prefix="enable-auto"):
     """🟢 Enable auto-moderation (§13): after Linking, or from the summary.
 

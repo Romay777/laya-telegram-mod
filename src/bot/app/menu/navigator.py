@@ -20,6 +20,8 @@ from app.i18n import translator_for
 from app.menu.screen import Screen
 from app.menu.screens import (
     add_chat_screen,
+    categories_screen,
+    chat_language_screen,
     chat_screen,
     enter_chat_screen,
     home_screen,
@@ -29,6 +31,7 @@ from app.menu.screens import (
     link_failed_screen,
     linked_chat_screen,
     my_alerts_screen,
+    sensitivity_screen,
     settings_screen,
 )
 from app.menu.screens.home import ChatSummary
@@ -143,6 +146,78 @@ class MenuNavigator:
                 chat_title,
                 chat_id=chat_id,
                 alert_mode=alert_mode,
+            ),
+        )
+
+    async def show_categories(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        enabled: Sequence[str],
+        locale: str,
+    ) -> None:
+        """Categories of one chat (§13): spam, ads and insult, on or off."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=categories_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                enabled=tuple(enabled),
+            ),
+        )
+
+    async def show_sensitivity(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        sensitivity: str,
+        locale: str,
+    ) -> None:
+        """Sensitivity of one chat (§13): Lenient, Balanced or Strict."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=sensitivity_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                sensitivity=sensitivity,
+            ),
+        )
+
+    async def show_chat_language(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        chat_language: str,
+        locale: str,
+    ) -> None:
+        """Chat Language of one chat (§15, §13): 🇷🇺 or 🇬🇧."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=chat_language_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                chat_language=chat_language,
             ),
         )
 
