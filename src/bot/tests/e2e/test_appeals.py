@@ -13,7 +13,7 @@ import pytest
 from aiogram.methods import GetChat, GetChatMember
 from aiogram.types import ChatPermissions
 from app.db.models import AdminAlert, Appeal, ChatNotice, FlaggedMessage, Violation
-from app.menu.callbacks import AppealCallback, AppealDecideCallback
+from app.menu.callbacks import AppealCallback, AppealDecideCallback, LiftRestrictionCallback
 from app.scheduler import Scheduler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -526,3 +526,34 @@ async def test_the_appeal_flow_speaks_the_chat_language(
     await appeal_press(app, chat_id, member_id, violation.id, notice.result.message_id)
     (text_edit,) = app.session.calls_of("EditMessageText")
     assert text_edit.method.text == "⏳ Апелляция отправлена администраторам"
+
+
+async def test_an_appeal_on_a_lifted_violation_is_refused_with_a_toast(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    await auto_moderation_chat(app, admin_id, chat_id)
+    await spam_message(app, chat_id, member_id, message_id=77)
+    notice = app.session.calls_of("SendMessage")[0]
+    violation = await the_violation(app.session_maker)
+
+    # An Admin lifts via the Violation alert: no appeal was filed (§6, §9).
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", permissions=DEFAULT_PERMISSIONS))
+    await app.feed(
+        private_callback_update(
+            admin_id,
+            LiftRestrictionCallback(chat_id=chat_id, violation_id=violation.id).pack(),
+            app.session.calls_of("SendMessage")[1].result.message_id,
+            language_code="en",
+            username="alpha",
+        )
+    )
+    app.session.calls.clear()
+
+    # The member presses the still-standing notice's button: check 3 of §8.
+    await appeal_press(app, chat_id, member_id, violation.id, notice.result.message_id)
+
+    assert app.session.call_names() == ["AnswerCallbackQuery"]
+    (answer,) = app.session.calls_of("AnswerCallbackQuery")
+    assert answer.method.text == "The restriction has already been lifted"
+    async with app.session_maker() as db:
+        assert (await db.execute(select(Appeal))).scalars().all() == []
