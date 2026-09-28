@@ -17,6 +17,7 @@ from aiogram.types import Message
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.alerts.fanout import AlertFanout
 from app.classifiers.client import Probabilities
 from app.classifiers.router import CheckSkip, ClassifierBackend
 from app.classifiers.spec import LAYA_MODEL, SPEC_VERSION
@@ -49,6 +50,7 @@ class ModerationPipeline:
         min_words: int,
         flagged_text_days: int,
         max_notice_lifetime_h: int,
+        fanout: AlertFanout,
     ) -> None:
         self._clock = clock
         self._core = core
@@ -57,6 +59,7 @@ class ModerationPipeline:
         self._min_words = min_words
         self._flagged_text_days = flagged_text_days
         self._max_notice_lifetime_h = max_notice_lifetime_h
+        self._fanout = fanout
 
     async def handle_message(
         self,
@@ -170,6 +173,20 @@ class ModerationPipeline:
                 restricted_until=violation.restricted_until,
                 max_lifetime_h=self._max_notice_lifetime_h,
             ),
+        )
+        # §6, step 5: the Admin Alert fan-out, after the Chat Notice.
+        await self._fanout.violation_alert(
+            bot,
+            session,
+            admin_cache=admin_cache,
+            chat=chat,
+            member_name=sender.first_name or str(sender.id),
+            category=decision.category,
+            confidence=decision.confidence,
+            step_seconds=violation.restriction_seconds or 0,
+            flagged_text=text,
+            flagged_entities=entities,
+            violation_id=violation.id,
         )
 
     async def _record(

@@ -48,6 +48,9 @@ max_queue_age_s = 300
 max_lifetime_h = 24
 outcome_visible_s = 600
 
+[alerts]
+pace_s = 1
+
 [suspicions]
 auto_close_h = 24
 

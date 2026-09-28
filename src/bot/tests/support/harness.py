@@ -83,6 +83,9 @@ async def build_app(
         # group prompt actually deletes inside the test.
         prompt_delete_after_s=prompt_delete_after_s,
         classifier=classifier,
+        # The default pace is one alert per second per Admin (§9); tests
+        # must not wait on it.
+        alerts_pace_s=0.0,
     )
 
     session = FakeBotSession()

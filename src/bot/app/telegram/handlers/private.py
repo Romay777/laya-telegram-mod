@@ -259,9 +259,10 @@ def create_private_router() -> Router:
 
         subs = AdminSubscriptionRepository(session)
         if callback_data.mode in ALERT_MODES:
+            # The mode was validated against ALERT_MODES just above.
             await subs.set_mode(
                 chat.chat_id, user_id=bot_user.user_id, alert_mode=callback_data.mode
-            )  # noqa: E501 — the mode is validated just above
+            )
         await navigator.show_my_alerts(
             bot=bot,
             session=session,

@@ -8,6 +8,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram_i18n import I18nMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.alerts.fanout import AlertFanout
 from app.classifiers.client import SystemOneClient
 from app.classifiers.router import BackendRouter, ClassifierBackend
 from app.classifiers.spec import LAYA_BASE_URL, LAYA_MODEL
@@ -21,6 +22,7 @@ from app.linking.service import LinkingService
 from app.menu.navigator import MenuNavigator
 from app.moderation.pipeline import ModerationPipeline, Thresholds
 from app.scheduler import Scheduler
+from app.telegram.handlers.alerts import create_alerts_router
 from app.telegram.handlers.group import create_group_router
 from app.telegram.handlers.linking import create_linking_router
 from app.telegram.handlers.private import create_private_router
@@ -65,6 +67,7 @@ def build_dispatcher(
     min_words: int = 3,
     flagged_text_days: int = 30,
     max_notice_lifetime_h: int = 24,
+    alerts_pace_s: float = 1.0,
 ) -> Dispatcher:
     navigator = MenuNavigator(core=i18n.core)
     linking = LinkingService(
@@ -74,6 +77,7 @@ def build_dispatcher(
         prompt_delete_after_s=prompt_delete_after_s,
     )
     admin_cache = AdminCache(clock=clock, ttl_s=admin_cache_ttl_s)
+    fanout = AlertFanout(core=i18n.core, clock=clock, pace_s=alerts_pace_s)
     pipeline = ModerationPipeline(
         clock=clock,
         core=i18n.core,
@@ -82,6 +86,7 @@ def build_dispatcher(
         min_words=min_words,
         flagged_text_days=flagged_text_days,
         max_notice_lifetime_h=max_notice_lifetime_h,
+        fanout=fanout,
     )
     dispatcher = Dispatcher(storage=PostgresStorage(session_maker))
     dispatcher.update.outer_middleware(DbSessionMiddleware(session_maker))
@@ -89,6 +94,7 @@ def build_dispatcher(
     i18n.setup(dispatcher)  # locale resolution runs after the DB middlewares
     dispatcher.include_router(create_private_router())
     dispatcher.include_router(create_linking_router())
+    dispatcher.include_router(create_alerts_router())
     dispatcher.include_router(create_group_router())
     dispatcher["navigator"] = navigator
     dispatcher["clock"] = clock
@@ -126,6 +132,7 @@ async def run() -> None:
         min_words=settings.moderation.min_words,
         flagged_text_days=settings.retention.flagged_text_days,
         max_notice_lifetime_h=settings.notices.max_lifetime_h,
+        alerts_pace_s=settings.alerts.pace_s,
     )
     bot = build_bot(settings.bot_token)
     # §11: one loop picks up every due job; Telegram lifts expired

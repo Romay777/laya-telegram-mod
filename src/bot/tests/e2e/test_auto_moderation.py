@@ -81,12 +81,14 @@ async def test_a_spam_message_runs_the_whole_violation_sequence(
         group_message_update(chat_id, member_id, SPAM_TEXT, message_id=77, sender_name="Spammer")
     )
 
-    # §6 order of actions: delete → restrict → notice; the admin cache asked once.
+    # §6 order of actions: delete → restrict → notice → fan out Admin Alerts;
+    # the admin cache asked once for the Member.
     assert app.session.call_names() == [
         "GetChatMember",
         "DeleteMessage",
         "RestrictChatMember",
         "SendMessage",
+        "SendMessage",  # the Linker's Violation Admin Alert (§9, §6 step 5)
     ]
     (delete,) = app.session.calls_of("DeleteMessage")
     assert (delete.method.chat_id, delete.method.message_id) == (chat_id, 77)
@@ -102,11 +104,14 @@ async def test_a_spam_message_runs_the_whole_violation_sequence(
     assert method.use_independent_chat_permissions is True
     assert method.until_date == int((FIXED_NOW + timedelta(hours=1)).timestamp())  # Step 1: 1 hour
 
-    (sent,) = app.session.calls_of("SendMessage")
+    (sent, alert) = app.session.calls_of("SendMessage")
     assert sent.method.chat_id == chat_id  # the Chat Notice, in the chat
     assert sent.method.text == (
         "Spammer, it looks like your message looks like spam. You can't write here for 1 hour."
     )
+    assert alert.method.chat_id == admin_id  # the Linker subscribed to All (§9)
+    assert "Spammer" in (alert.method.text or "")
+    assert "Buy cheap crypto now" in (alert.method.text or "")  # the quoted message (§9)
 
     # DB state: the check row, the flagged text, the Violation, the notice.
     check = await the_only_check(app.session_maker)

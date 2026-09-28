@@ -93,6 +93,13 @@ class ObservationSettings:
 
 
 @dataclass(frozen=True)
+class AlertsSettings:
+    """The private-alert pace (§9): about one message per second per Admin."""
+
+    pace_s: float = 1
+
+
+@dataclass(frozen=True)
 class RetentionSettings:
     flagged_text_days: int = 30
     removed_chat_days: int = 30
@@ -128,6 +135,7 @@ class Settings:
     classifier: ClassifierSettings = field(default_factory=ClassifierSettings)
     moderation: ModerationSettings = field(default_factory=ModerationSettings)
     notices: NoticesSettings = field(default_factory=NoticesSettings)
+    alerts: AlertsSettings = field(default_factory=AlertsSettings)
     suspicions: SuspicionsSettings = field(default_factory=SuspicionsSettings)
     observation: ObservationSettings = field(default_factory=ObservationSettings)
     retention: RetentionSettings = field(default_factory=RetentionSettings)
@@ -185,6 +193,7 @@ class Settings:
             classifier=ClassifierSettings(**config.get("classifier", {})),
             moderation=ModerationSettings(**config.get("moderation", {})),
             notices=NoticesSettings(**config.get("notices", {})),
+            alerts=AlertsSettings(**config.get("alerts", {})),
             suspicions=SuspicionsSettings(**config.get("suspicions", {})),
             observation=ObservationSettings(**config.get("observation", {})),
             retention=RetentionSettings(**config.get("retention", {})),
