@@ -42,3 +42,4 @@ menu-my-alerts-text = Which private alerts about {$chat} you receive.
 alert-mode-all = All
 alert-mode-appeals = Appeals only
 alert-mode-off = Off
+menu-alerts-last-appeal-warning = Members won't be able to appeal

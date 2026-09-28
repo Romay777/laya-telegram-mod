@@ -10,6 +10,7 @@ from aiogram_i18n import I18nContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.alerts import ALERT_MODES
+from app.alerts.fanout import APPEAL_MODES
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
@@ -258,6 +259,7 @@ def create_private_router() -> Router:
             return
 
         subs = AdminSubscriptionRepository(session)
+        previous_mode = await subs.get_mode(chat.chat_id, bot_user.user_id)
         if callback_data.mode in ALERT_MODES:
             # The mode was validated against ALERT_MODES just above.
             await subs.set_mode(
@@ -272,6 +274,17 @@ def create_private_router() -> Router:
             alert_mode=await subs.get_mode(chat.chat_id, bot_user.user_id),
             locale=i18n.locale,
         )
+        # §9: switching off the last Appeal-receiving recipient warns first.
+        if (
+            callback_data.mode == "off"
+            and previous_mode in APPEAL_MODES
+            and not await subs.user_ids_with_modes(chat.chat_id, modes=APPEAL_MODES)
+        ):
+            await callback.answer(
+                text=translator_for(i18n.core, i18n.locale)("menu-alerts-last-appeal-warning"),
+                show_alert=True,
+            )
+            return
         await callback.answer()
 
     @router.message(StateFilter(FallbackLinkStates.waiting_for_chat), F.chat.type == "private")

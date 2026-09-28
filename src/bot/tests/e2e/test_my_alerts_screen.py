@@ -169,3 +169,39 @@ async def test_a_non_admin_cannot_change_anyone_alerts(
     assert answer.text == "You are no longer an admin of this chat."
     rows = await subscriptions(app.session_maker)
     assert [(row.user_id, row.alert_mode) for row in rows] == [(admin_id, "all")]
+
+
+async def test_switching_off_the_last_appeal_recipient_warns_first(
+    app: TestApp, admin_id: int, other_admin_id: int, chat_id: int
+) -> None:
+    menu = await linked_via_deeplink(app, admin_id, chat_id)
+    app.session.script(GetChatMember, member_administrator(user(other_admin_id)))
+    other_menu = await started_admin(app, other_admin_id)
+    await app.feed(
+        private_callback_update(
+            other_admin_id, f"chat-alerts:{chat_id}:all", other_menu, language_code="en"
+        )
+    )
+    app.session.calls.clear()
+
+    # The Linker switches off while the second Admin still receives Appeals:
+    # no warning — Appeals live on (§9).
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        private_callback_update(admin_id, f"chat-alerts:{chat_id}:off", menu, language_code="en")
+    )
+    (answer,) = app.session.calls_of("AnswerCallbackQuery")
+    assert answer.method.text is None  # no warning while Appeals live on
+    app.session.calls.clear()
+
+    # The last Appeal recipient switches off: the warning comes first (§9).
+    await app.feed(
+        private_callback_update(
+            other_admin_id, f"chat-alerts:{chat_id}:off", other_menu, language_code="en"
+        )
+    )
+    (answer,) = app.session.calls_of("AnswerCallbackQuery")
+    assert answer.method.text == "Members won't be able to appeal"
+    assert answer.method.show_alert is True
+    rows = await subscriptions(app.session_maker)
+    assert all(row.alert_mode == "off" for row in rows)

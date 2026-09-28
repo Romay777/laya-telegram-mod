@@ -29,7 +29,9 @@ from tests.support.telegram import chat_facts, member_administrator, member_memb
 from tests.support.updates import (
     group_callback_update,
     group_message_update,
+    my_chat_member_update,
     private_callback_update,
+    start_update,
     user,
 )
 
@@ -315,7 +317,7 @@ async def filed_appeal(
 async def test_approving_lifts_the_restriction_and_shows_the_outcome_everywhere(
     app: TestApp, admin_id: int, member_id: int, chat_id: int
 ) -> None:
-    second_id = await opted_in_second_admin(app, admin_id, chat_id, mode="appeals")
+    _second_id = await opted_in_second_admin(app, admin_id, chat_id, mode="appeals")
     appeal, copy_ids, notice_message_id = await filed_appeal(app, admin_id, member_id, chat_id)
     assert len(copy_ids) == 2  # the Linker (All) and the second Admin (Appeals only)
     app.session.calls.clear()
@@ -374,7 +376,7 @@ async def test_rejecting_keeps_the_restriction_and_shows_the_outcome_everywhere(
     app: TestApp, admin_id: int, member_id: int, chat_id: int
 ) -> None:
     await auto_moderation_chat(app, admin_id, chat_id)
-    appeal, copy_ids, notice_message_id = await filed_appeal(app, admin_id, member_id, chat_id)
+    appeal, copy_ids, _notice_message_id = await filed_appeal(app, admin_id, member_id, chat_id)
     app.session.calls.clear()
 
     await app.feed(
@@ -473,3 +475,54 @@ async def test_an_appeal_after_the_purge_says_the_text_is_no_longer_stored(
     assert "The message text is no longer stored." in text  # the purged case (§8)
     assert SPAM_TEXT not in text
     assert not [entity for entity in alert.method.entities or [] if entity.type == "blockquote"]
+
+
+async def russian_chat(app: TestApp, admin_id: int, chat_id: int) -> int:
+    """A chat linked by a Russian-speaking Linker: its Chat Language is ru (§12)."""
+    await app.feed(start_update(admin_id, "ru"))
+    menu = app.session.calls_of("SendMessage")[0].result.message_id
+    await app.feed(
+        private_callback_update(admin_id, "menu:set-language:ru", menu, language_code="ru")
+    )
+    await app.feed(private_callback_update(admin_id, "menu:add-to-chat:", menu, language_code="ru"))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        my_chat_member_update(chat_id, "supergroup", linker_id=admin_id, title="Мой чат")
+    )
+    app.session.script(GetChatMember, member_owner(user(admin_id)))  # the chat screen's re-check
+    for data in (f"chat:{chat_id}", f"chat-settings:{chat_id}", f"chat-mode:{chat_id}"):
+        await app.feed(private_callback_update(admin_id, data, menu, language_code="ru"))
+    app.session.calls.clear()
+    return menu
+
+
+async def test_the_appeal_flow_speaks_the_chat_language(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    await russian_chat(app, admin_id, chat_id)
+    await spam_message(app, chat_id, member_id, message_id=77)
+    notice = app.session.calls_of("SendMessage")[0]
+    violation = await the_violation(app.session_maker)
+
+    # The button follows the Chat Language (§7, §15).
+    (row,) = notice.method.reply_markup.inline_keyboard
+    assert row[0].text == "🙋 Это ошибка"
+
+    # A bystander's toast speaks the Chat Language too (§15).
+    await app.feed(
+        group_callback_update(
+            member_id + 1,
+            AppealCallback(chat_id=chat_id, violation_id=violation.id).pack(),
+            chat_id=chat_id,
+            message_id=notice.result.message_id,
+            sender_name="Посторонний",
+        )
+    )
+    (answer,) = app.session.calls_of("AnswerCallbackQuery")
+    assert answer.method.text == "Эта кнопка не для вас"
+
+    # So does the pending text on the notice (§8).
+    app.session.calls.clear()
+    await appeal_press(app, chat_id, member_id, violation.id, notice.result.message_id)
+    (text_edit,) = app.session.calls_of("EditMessageText")
+    assert text_edit.method.text == "⏳ Апелляция отправлена администраторам"

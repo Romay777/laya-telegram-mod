@@ -42,3 +42,4 @@ menu-my-alerts-text = Какие личные оповещения о чате �
 alert-mode-all = Все
 alert-mode-appeals = Только апелляции
 alert-mode-off = Выключено
+menu-alerts-last-appeal-warning = Участники не смогут подать апелляцию
