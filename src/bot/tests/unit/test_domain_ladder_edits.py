@@ -7,12 +7,12 @@ PRESETS = (300, 900, 3600, 10800, 43200, 86400, 259200, 604800, 2592000, 0)
 EXPIRY_PRESETS = (604800, 1209600, 2592000, 5184000, 7776000, None)
 
 
-def test_the_step_presets_are_the_six_from_the_issue() -> None:
-    assert ladder_edits.STEP_PRESETS == PRESETS
+def test_the_step_presets_are_the_ten_from_the_architecture() -> None:
+    assert ladder_edits.STEP_PRESETS == PRESETS  # 5m 15m 1h 3h 12h 1d 3d 7d 30d forever
 
 
-def test_the_expiry_presets_are_the_six_from_the_issue() -> None:
-    assert ladder_edits.EXPIRY_PRESETS == EXPIRY_PRESETS
+def test_the_expiry_presets_are_the_six_from_the_architecture() -> None:
+    assert ladder_edits.EXPIRY_PRESETS == EXPIRY_PRESETS  # 7d 14d 30d 60d 90d never
 
 
 def test_adding_a_step_appends_it() -> None:

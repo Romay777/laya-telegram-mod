@@ -475,6 +475,21 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
             return
 
+        if not 0 <= callback_data.index < len(chat.ladder):
+            # A stale keyboard names a Step the ladder no longer has (§13).
+            await navigator.show_ladder(
+                bot=bot,
+                session=session,
+                user=bot_user,
+                chat_id=chat.chat_id,
+                chat_title=chat.title,
+                ladder=tuple(chat.ladder),
+                expiry_seconds=chat.expiry_seconds,
+                locale=i18n.locale,
+            )
+            await callback.answer()
+            return
+
         if callback_data.seconds is None:
             # The screen was merely opened: show the Step's duration presets.
             await navigator.show_ladder_step(
@@ -575,7 +590,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
             return
 
-        stored_expiry = None if callback_data.seconds == 0 else callback_data.seconds
+        stored_expiry = ladder_edits.decode_expiry(callback_data.seconds)
         await ChatRepository(session).set_expiry(chat.chat_id, stored_expiry)
         await navigator.show_ladder(
             bot=bot,

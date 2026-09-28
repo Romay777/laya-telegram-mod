@@ -29,6 +29,10 @@ EXPIRY_PRESETS: tuple[int | None, ...] = (
     None,  # never
 )
 
+#: The callback encoding of "never": Expiry callback data is a plain integer,
+#: while the `chat` row stores None for it (§12).
+NEVER = 0
+
 #: The ladder is always 1-10 Steps long (§6).
 MIN_STEPS = 1
 MAX_STEPS = 10
@@ -42,6 +46,16 @@ def can_add(ladder: tuple[int, ...] | list[int]) -> bool:
 def can_remove(ladder: tuple[int, ...] | list[int]) -> bool:
     """Whether 🔴 Remove last is enabled: the ladder has more than 1 Step."""
     return len(ladder) > MIN_STEPS
+
+
+def encode_expiry(expiry_seconds: int | None) -> int:
+    """The Expiry as callback data carries it: None (never) travels as 0 (§12)."""
+    return NEVER if expiry_seconds is None else expiry_seconds
+
+
+def decode_expiry(seconds: int) -> int | None:
+    """The Expiry a callback named, as the `chat` row stores it (§12)."""
+    return None if seconds == NEVER else seconds
 
 
 def add_step(ladder: tuple[int, ...] | list[int], duration: int) -> tuple[int, ...]:

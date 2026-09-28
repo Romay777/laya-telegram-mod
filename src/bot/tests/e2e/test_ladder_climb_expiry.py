@@ -15,7 +15,7 @@ from aiogram.methods import GetChatMember
 from app.db.models import Violation
 from sqlalchemy import select
 
-from tests.support.harness import TestApp, app_fixture, auto_moderation_chat
+from tests.support.harness import FIXED_NOW, TestApp, app_fixture, auto_moderation_chat
 from tests.support.telegram import member_member
 from tests.support.updates import group_message_update, user
 
@@ -71,8 +71,6 @@ async def test_three_violations_climb_one_hour_one_day_forever_then_expiry_resta
     await violate(app, chat_id, member_id, message_id=102)
     await violate(app, chat_id, member_id, message_id=103)
 
-    from tests.support.harness import FIXED_NOW
-
     restricts = app.session.calls_of("RestrictChatMember")
     assert len(restricts) == 3
     untils = [call.method.until_date for call in restricts]
@@ -97,6 +95,7 @@ async def test_three_violations_climb_one_hour_one_day_forever_then_expiry_resta
 
     (restart,) = app.session.calls_of("RestrictChatMember")
     # Step 1 again: one hour from the Violation the clock now stands at.
+    # Exactly one RestrictChatMember — Expiry lifted no earlier Restriction (§6).
     assert restart.method.until_date == int((app.clock.now() + timedelta(hours=1)).timestamp())
     rows = await violations(app)
     assert (rows[-1].step_index, rows[-1].restriction_seconds) == (0, 3600)

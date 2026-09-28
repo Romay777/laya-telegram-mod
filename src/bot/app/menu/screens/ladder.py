@@ -21,10 +21,6 @@ from app.menu.screen import Screen
 from app.menu.screens.buttons import DANGER, PRIMARY
 from app.notices.sender import duration_text
 
-#: The callback encoding of "never": callback data is a plain integer, the
-#: `chat` row stores None for it (§12).
-NEVER = 0
-
 
 def ladder_screen(
     t: GetText,
@@ -61,9 +57,7 @@ def add_remove_row(
 ) -> list[InlineKeyboardButton]:
     """+ appends a Step, 🔴 drops the last one; the limit breaker is `disabled`.
 
-    🔴 Remove last wears the danger style (§13: destructive). The Expiry
-    header sits on the same row, so the keyboard reads: Steps, Add/Remove
-    + "Expires after", presets, Back.
+    🔴 Remove last wears the danger style (§13: destructive).
     """
     return [
         InlineKeyboardButton(
@@ -93,34 +87,19 @@ def expiry_rows(
 ) -> list[list[InlineKeyboardButton]]:
     """The §6 Expiry presets, in two rows of three; the chat's choice wears primary.
 
-    The `never` preset (stored as None on the chat row) is encoded as 0 in
-    callback data, so it compares against `or_never(expiry_seconds)`.
+    The presets come from `ladder_edits.EXPIRY_PRESETS` with the Fluent
+    labels in screen order; the callback data carries the `never` encoding.
     """
+    labels = ("7d", "14d", "30d", "60d", "90d", "never")
     buttons = [
         InlineKeyboardButton(
             text=t(f"menu-ladder-expiry-{label}"),
             callback_data=ExpiryCallback(
                 chat_id=chat_id,
-                seconds=seconds,
+                seconds=ladder_edits.encode_expiry(preset),
             ).pack(),
-            style=PRIMARY if seconds == or_never(expiry_seconds) else None,
+            style=PRIMARY if preset == expiry_seconds else None,
         )
-        for label, seconds in _EXPIRY_CHOICES
+        for label, preset in zip(labels, ladder_edits.EXPIRY_PRESETS, strict=True)
     ]
     return [buttons[:3], buttons[3:]]
-
-
-def or_never(expiry_seconds: int | None) -> int:
-    """The callback encoding of an Expiry: None (never) travels as 0 (§12)."""
-    return NEVER if expiry_seconds is None else expiry_seconds
-
-
-#: The §6 Expiry presets, in screen order, with their Fluent labels.
-_EXPIRY_CHOICES: tuple[tuple[str, int], ...] = (
-    ("7d", 7 * 86400),
-    ("14d", 14 * 86400),
-    ("30d", 30 * 86400),
-    ("60d", 60 * 86400),
-    ("90d", 90 * 86400),
-    ("never", NEVER),
-)
