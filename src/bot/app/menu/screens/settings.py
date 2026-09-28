@@ -1,8 +1,8 @@
-"""The Settings screen (§13): Mode, Categories, Sensitivity, Ladder, Chat Language.
+"""The Settings screen (§13): Mode, Categories, Sensitivity, Ladder, Chat Language, Notice Template.
 
 Every chat starts in Observation Mode; the Admin arms Auto-moderation here.
-The remaining §13 settings (Notice Template, Backend) arrive with their own
-tickets and are not shown before they exist.
+The Classifier Backend arrives with its own ticket and is not shown before
+it exists.
 """
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,6 +15,7 @@ from app.menu.callbacks import (
     ChatModeCallback,
     LadderCallback,
     MyAlertsCallback,
+    NoticeTemplateCallback,
     SensitivityCallback,
 )
 from app.menu.screen import Screen
@@ -39,6 +40,7 @@ def settings_screen(
                 [sensitivity_button(t, chat_id=chat_id)],
                 [ladder_button(t, chat_id=chat_id)],
                 [chat_language_button(t, chat_id=chat_id)],
+                [notice_template_button(t, chat_id=chat_id)],
                 [my_alerts_button(t, chat_id=chat_id)],
                 [
                     InlineKeyboardButton(
@@ -48,6 +50,14 @@ def settings_screen(
                 ],
             ]
         ),
+    )
+
+
+def notice_template_button(t: GetText, *, chat_id: int) -> InlineKeyboardButton:
+    """Notice Template (§13, §14): the chat's own Violation announcement."""
+    return InlineKeyboardButton(
+        text=t("menu-chat-notice-template"),
+        callback_data=NoticeTemplateCallback(chat_id=chat_id).pack(),
     )
 
 

@@ -11,11 +11,13 @@ from collections.abc import Sequence
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import MessageEntity
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser
 from app.domain.linking import LinkingProblems
+from app.domain.template import Validation
 from app.i18n import translator_for
 from app.menu.screen import Screen
 from app.menu.screens import (
@@ -33,6 +35,7 @@ from app.menu.screens import (
     link_failed_screen,
     linked_chat_screen,
     my_alerts_screen,
+    notice_template_screens,
     sensitivity_screen,
     settings_screen,
 )
@@ -272,6 +275,82 @@ class MenuNavigator:
                 chat_id=chat_id,
                 index=index,
                 seconds=seconds,
+            ),
+        )
+
+    async def show_notice_template(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        chat_language: str,
+        template_text: str | None,
+        locale: str,
+    ) -> None:
+        """The Notice Template of one chat (§14): the current one, or the default."""
+        core = self.core
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=notice_template_screens.template_screen(
+                translator_for(core, locale),
+                translator_for(core, chat_language),
+                chat_title,
+                chat_id=chat_id,
+                template_text=template_text,
+            ),
+        )
+
+    async def show_template_edit(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        locale: str,
+    ) -> None:
+        """Edit (§14): the prompt to send a formatted message."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=notice_template_screens.edit_screen(
+                translator_for(self.core, locale), chat_title, chat_id=chat_id
+            ),
+        )
+
+    async def show_template_preview(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_language: str,
+        text: str,
+        entities: Sequence[MessageEntity],
+        validation: Validation,
+        locale: str,
+    ) -> None:
+        """The Preview (§14): sample values in the Chat Language, then the choice."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=notice_template_screens.preview_screen(
+                translator_for(self.core, locale),
+                translator_for(self.core, chat_language),
+                None,
+                chat_id=chat_id,
+                text=text,
+                entities=entities,
+                validation=validation,
             ),
         )
 

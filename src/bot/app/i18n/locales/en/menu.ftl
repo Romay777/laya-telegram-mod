@@ -64,3 +64,14 @@ menu-ladder-expiry-60d = 60 days
 menu-ladder-expiry-90d = 90 days
 menu-ladder-expiry-never = never
 
+menu-chat-notice-template = Notice Template
+menu-template-text = The chat's own violation announcement, with its formatting. Placeholders: {"{"}user{"}"}, {"{"}reason{"}"}, {"{"}duration{"}"}, {"{"}strike{"}"}.
+menu-template-edit = Edit
+menu-template-edit-text = Send me the new template as a formatted message. I will read it, delete it, and show you a preview. Placeholders: {"{"}user{"}"}, {"{"}reason{"}"}, {"{"}duration{"}"}, {"{"}strike{"}"}. Write {"{{"} and {"}}"} for literal braces.
+menu-template-preview-text = Here is how the notice will look:
+menu-template-save = 🟢 Save
+menu-template-cancel = Cancel
+menu-template-reset = 🔴 Reset to default
+menu-template-unknown = I don't know the placeholder "{$placeholder}". Allowed names: {$allowed}.
+menu-template-missing-user = Warning: the template has no {"{"}user{"}"}, so the notice won't name the member. You can still save it.
+menu-template-too-long = The longest possible notice is over 1024 characters. Shorten the template.

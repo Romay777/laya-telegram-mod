@@ -74,6 +74,7 @@ async def test_the_chat_screen_leads_to_the_mode_switch(
         (sensitivity,),
         (ladder,),
         (language,),
+        (template,),
         (my_alerts,),
         (back_to_chat,),
     ) = edit.reply_markup.inline_keyboard
@@ -81,6 +82,7 @@ async def test_the_chat_screen_leads_to_the_mode_switch(
     assert sensitivity.callback_data == f"chat-sensitivity:{chat_id}:"  # §13: Sensitivity
     assert ladder.callback_data == f"chat-ladder:{chat_id}"  # §13: Penalty Ladder
     assert language.callback_data == f"chat-language:{chat_id}:"  # §13: Chat Language
+    assert template.callback_data == f"chat-template:{chat_id}"  # §13, §14: Notice Template
     assert my_alerts.callback_data == f"chat-alerts:{chat_id}:"  # §13: My alerts
     assert enable_auto.text == "🟢 Enable auto-moderation"
     assert enable_auto.callback_data == f"chat-mode:{chat_id}"

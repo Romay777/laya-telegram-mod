@@ -167,6 +167,36 @@ class MyAlertsCallback(CallbackData, prefix="chat-alerts"):
     mode: str | None = None
 
 
+class NoticeTemplateCallback(CallbackData, prefix="chat-template"):
+    """The Notice Template screen (§13, §14) of one chat."""
+
+    chat_id: int
+
+
+class NoticeTemplateEditCallback(CallbackData, prefix="chat-template-edit"):
+    """✏️ Edit on the Notice Template screen (§14): the bot waits for a message."""
+
+    chat_id: int
+
+
+class NoticeTemplateSaveCallback(CallbackData, prefix="chat-template-save"):
+    """🟢 Save on the template Preview (§14): store what the Admin sent."""
+
+    chat_id: int
+
+
+class NoticeTemplateCancelCallback(CallbackData, prefix="chat-template-cancel"):
+    """Cancel on the template Preview (§14): the stored template stands."""
+
+    chat_id: int
+
+
+class NoticeTemplateResetCallback(CallbackData, prefix="chat-template-reset"):
+    """🔴 Reset to default on the template Preview (§14): drop the stored one."""
+
+    chat_id: int
+
+
 class LiftRestrictionCallback(CallbackData, prefix="lift"):
     """🟢 Lift restriction on a Violation's Admin Alert copy (§9).
 

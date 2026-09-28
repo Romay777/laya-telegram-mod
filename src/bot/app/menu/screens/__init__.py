@@ -1,5 +1,6 @@
 """The Menu screens (§13): one module per screen."""
 
+from app.menu.screens import notice_template as notice_template_screens
 from app.menu.screens.add_chat import add_chat_screen
 from app.menu.screens.categories import categories_screen
 from app.menu.screens.chat import chat_screen
@@ -32,6 +33,7 @@ __all__ = [
     "link_failed_screen",
     "linked_chat_screen",
     "my_alerts_screen",
+    "notice_template_screens",
     "sensitivity_screen",
     "settings_screen",
 ]

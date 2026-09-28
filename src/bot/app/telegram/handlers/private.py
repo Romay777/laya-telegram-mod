@@ -6,6 +6,7 @@ from typing import cast
 from aiogram import Bot, F, Router
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram_i18n import I18nContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,7 @@ from app.clock import Clock
 from app.config import SENSITIVITIES
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
+from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.domain import ladder_edits
 from app.i18n import SUPPORTED_LANGUAGES, translator_for
@@ -36,11 +38,20 @@ from app.menu.callbacks import (
     MenuAction,
     MenuCallback,
     MyAlertsCallback,
+    NoticeTemplateCallback,
+    NoticeTemplateCancelCallback,
+    NoticeTemplateEditCallback,
+    NoticeTemplateResetCallback,
+    NoticeTemplateSaveCallback,
     ObserveCallback,
     SensitivityCallback,
 )
 from app.menu.navigator import MenuNavigator
 from app.menu.screens.home import ChatSummary
+from app.menu.screens.notice_template import (
+    strip_custom_emoji,
+    validate_template,
+)
 
 #: The §13 default: the choice offered right after Linking waits 2 days.
 DEFAULT_SUMMARY_AFTER_H = 48
@@ -48,6 +59,12 @@ DEFAULT_SUMMARY_AFTER_H = 48
 #: The duration a freshly appended Step starts at: 30 days, the largest
 #: timed preset, so a new Step never surprises with a short mute.
 NEW_STEP_SECONDS = 30 * 86400
+
+
+class TemplateInputStates(StatesGroup):
+    """The FSM state of the template Edit: the bot waits for the Admin's message."""
+
+    waiting_for_template = State()
 
 
 def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Router:
@@ -653,6 +670,250 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             )
             return
         await callback.answer()
+
+    @router.callback_query(NoticeTemplateCallback.filter(), F.message.chat.type == "private")
+    async def notice_template(
+        callback: CallbackQuery,
+        callback_data: NoticeTemplateCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """The Notice Template screen (§14): the current one, or the default."""
+        # Opening the Menu cancels any input wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        template = await NoticeTemplateRepository(session).get(chat.chat_id)
+        await navigator.show_notice_template(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            chat_language=chat.chat_language,
+            template_text=template.text if template is not None else None,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(NoticeTemplateEditCallback.filter(), F.message.chat.type == "private")
+    async def notice_template_edit(
+        callback: CallbackQuery,
+        callback_data: NoticeTemplateEditCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """Edit (§14): the bot waits for the Admin's formatted message."""
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        await state.set_state(TemplateInputStates.waiting_for_template)
+        await state.update_data(
+            template_chat_id=chat.chat_id, template_chat_language=chat.chat_language
+        )
+        await navigator.show_template_edit(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(NoticeTemplateSaveCallback.filter(), F.message.chat.type == "private")
+    async def notice_template_save(
+        callback: CallbackQuery,
+        callback_data: NoticeTemplateSaveCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """🟢 Save (§14): store the previewed text and entities as received."""
+        data = await state.get_data()
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        text, entities = data.get("template_text"), data.get("template_entities")
+        if text is None or data.get("template_chat_id") != chat.chat_id:
+            # No previewed draft (the wait was cancelled): back to the screen.
+            template = await NoticeTemplateRepository(session).get(chat.chat_id)
+            await navigator.show_notice_template(
+                bot=bot,
+                session=session,
+                user=bot_user,
+                chat_id=chat.chat_id,
+                chat_title=chat.title,
+                chat_language=chat.chat_language,
+                template_text=template.text if template is not None else None,
+                locale=i18n.locale,
+            )
+            await callback.answer()
+            return
+        await NoticeTemplateRepository(session).save(
+            chat.chat_id,
+            text=str(text),
+            entities=list(entities or []),
+            updated_by=bot_user.user_id,
+        )
+        await navigator.show_notice_template(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            chat_language=chat.chat_language,
+            template_text=str(text),
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(NoticeTemplateResetCallback.filter(), F.message.chat.type == "private")
+    async def notice_template_reset(
+        callback: CallbackQuery,
+        callback_data: NoticeTemplateResetCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """🔴 Reset to default (§14): the stored template is dropped."""
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        await NoticeTemplateRepository(session).delete(chat.chat_id)
+        await navigator.show_notice_template(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            chat_language=chat.chat_language,
+            template_text=None,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(NoticeTemplateCancelCallback.filter(), F.message.chat.type == "private")
+    async def notice_template_cancel(
+        callback: CallbackQuery,
+        callback_data: NoticeTemplateCancelCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """Cancel on the Preview (§14): the draft is dropped, the stored
+        template — or the default — stands."""
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        template = await NoticeTemplateRepository(session).get(chat.chat_id)
+        await navigator.show_notice_template(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            chat_language=chat.chat_language,
+            template_text=template.text if template is not None else None,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.message(StateFilter(TemplateInputStates.waiting_for_template), F.chat.type == "private")
+    async def template_input(
+        message: Message,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """The template message arrives: read it, delete it, preview it (§14).
+
+        Only text messages carry the formatting §14 stores; anything else is
+        not a template, so the wait continues. The message's `text` and
+        `entities` are kept as received — `custom_emoji` entities are
+        removed, their fallback emoji characters stay in the text.
+        """
+        text, entities = message.text, message.entities or []
+        if text is None:
+            return
+
+        data = await state.get_data()
+        chat_id = data.get("template_chat_id")
+        chat_language = data.get("template_chat_language", "en")
+        if chat_id is None or not await admin_cache.is_admin(bot, chat_id, message.from_user.id):
+            await state.clear()
+            return
+
+        # The read input is deleted (§13) — the one exception is the fallback
+        # Linking forward, not this message.
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+
+        stored_text, stored_entities = strip_custom_emoji(text, entities)
+        # The draft survives the wait being over: 🟢 Save reads it from here.
+        await state.set_state(None)
+        await state.update_data(
+            template_chat_id=chat_id,
+            template_text=stored_text,
+            template_entities=stored_entities,
+        )
+        validation = validate_template(i18n.core, str(chat_language), stored_text, entities)
+        await navigator.show_template_preview(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=int(chat_id),
+            chat_language=str(chat_language),
+            text=stored_text,
+            entities=entities,
+            validation=validation,
+            locale=i18n.locale,
+        )
 
     @router.callback_query(JournalCallback.filter(), F.message.chat.type == "private")
     async def open_journal(

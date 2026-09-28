@@ -36,6 +36,7 @@ def _private_chat_message(
     language_code: str | None,
     text: str | None = None,
     forward_origin: MessageOriginChat | None = None,
+    entities: list[MessageEntity] | None = None,
 ) -> Message:
     return Message(
         message_id=message_id,
@@ -43,6 +44,7 @@ def _private_chat_message(
         chat=Chat(id=user_id, type="private"),
         from_user=_user(user_id, language_code),
         text=text,
+        entities=entities,
         forward_origin=forward_origin,
     )
 
@@ -61,11 +63,14 @@ def private_text_update(
     *,
     message_id: int,
     language_code: str | None,
+    entities: list[MessageEntity] | None = None,
 ) -> Update:
-    """A free-text message from the Admin's private chat."""
+    """A free-text message from the Admin's private chat, formatting included."""
     return Update(
         update_id=0,
-        message=_private_chat_message(user_id, message_id, language_code, text=text),
+        message=_private_chat_message(
+            user_id, message_id, language_code, text=text, entities=entities
+        ),
     )
 
 

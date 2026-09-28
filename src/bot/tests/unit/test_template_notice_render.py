@@ -31,7 +31,14 @@ async def test_a_template_renders_user_as_text_mention() -> None:
     )
 
     assert text == "Вася 🐸, it looks like your message looks like spam."
-    assert entities == [{"type": "text_mention", "offset": 0, "length": 7, "user": {"id": 123}}]
+    assert entities == [
+        {
+            "type": "text_mention",
+            "offset": 0,
+            "length": 7,
+            "user": {"id": 123, "is_bot": False, "first_name": "Вася 🐸"},
+        }
+    ]
 
 
 async def test_reason_duration_and_strike_follow_the_chat_language() -> None:

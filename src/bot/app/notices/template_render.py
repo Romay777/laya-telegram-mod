@@ -59,13 +59,17 @@ def render_template_notice(
             [],
         )
     name = member["name"]
+    user_id = member["user_id"]
     return render(
         text,
         entities or [],
         {
             "user": Replacement(
                 name,
-                entity={"type": "text_mention", "user": {"id": member["user_id"]}},
+                entity={
+                    "type": "text_mention",
+                    "user": {"id": user_id, "is_bot": False, "first_name": name},
+                },
             ),
             "reason": Replacement(t(f"notice-reason-{category}")),
             "duration": Replacement(duration_text(t, step_seconds)),
