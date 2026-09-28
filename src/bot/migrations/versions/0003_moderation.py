@@ -37,9 +37,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["chat_id"], ["chat.chat_id"], ondelete="CASCADE"),
     )
-    op.create_index(
-        "ix_message_check_chat_created_at", "message_check", ["chat_id", "created_at"]
-    )
+    op.create_index("ix_message_check_chat_created_at", "message_check", ["chat_id", "created_at"])
 
     op.create_table(
         "flagged_message",
