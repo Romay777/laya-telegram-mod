@@ -13,7 +13,6 @@ from app.db.models import Chat, Violation
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.moderation import ModerationRepository
 from app.domain.linking import DEFAULT_EXPIRY_SECONDS, DEFAULT_LADDER
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # The Postgres container is shared across tests, so every test gets its own chat.

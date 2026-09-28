@@ -1,4 +1,4 @@
-"""Unit: ladder-edit rules (§6) — add/remove within 1–10 Steps, preset values."""
+"""Unit: ladder-edit rules (§6) — add/remove within 1-10 Steps, preset values."""
 
 from app.domain import ladder_edits
 from app.domain.linking import DEFAULT_LADDER

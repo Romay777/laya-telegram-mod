@@ -1,8 +1,8 @@
-"""The Settings screen (§13): Mode, Categories, Sensitivity, Chat Language, My alerts.
+"""The Settings screen (§13): Mode, Categories, Sensitivity, Ladder, Chat Language.
 
 Every chat starts in Observation Mode; the Admin arms Auto-moderation here.
-The remaining §13 settings (Penalty Ladder, Notice Template, Backend)
-arrive with their own tickets and are not shown before they exist.
+The remaining §13 settings (Notice Template, Backend) arrive with their own
+tickets and are not shown before they exist.
 """
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,6 +13,7 @@ from app.menu.callbacks import (
     ChatCallback,
     ChatLanguageCallback,
     ChatModeCallback,
+    LadderCallback,
     MyAlertsCallback,
     SensitivityCallback,
 )
@@ -36,6 +37,7 @@ def settings_screen(
                 [mode_button(t, chat_id=chat_id, mode=mode)],
                 [categories_button(t, chat_id=chat_id)],
                 [sensitivity_button(t, chat_id=chat_id)],
+                [ladder_button(t, chat_id=chat_id)],
                 [chat_language_button(t, chat_id=chat_id)],
                 [my_alerts_button(t, chat_id=chat_id)],
                 [
@@ -46,6 +48,14 @@ def settings_screen(
                 ],
             ]
         ),
+    )
+
+
+def ladder_button(t: GetText, *, chat_id: int) -> InlineKeyboardButton:
+    """Penalty Ladder (§13): the Steps and the Expiry, edited with buttons."""
+    return InlineKeyboardButton(
+        text=t("menu-chat-ladder"),
+        callback_data=LadderCallback(chat_id=chat_id).pack(),
     )
 
 

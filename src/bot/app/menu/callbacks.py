@@ -93,6 +93,51 @@ class ChatLanguageCallback(CallbackData, prefix="chat-language"):
     code: str | None = None
 
 
+class LadderCallback(CallbackData, prefix="chat-ladder"):
+    """The Penalty Ladder screen (§13) of one chat.
+
+    The screen lists the chat's Steps plus + Add step, 🔴 Remove last and
+    the Expiry presets (§6).
+    """
+
+    chat_id: int
+
+
+class LadderStepCallback(CallbackData, prefix="chat-ladder-step"):
+    """One Step of the Penalty Ladder (§13): its duration presets.
+
+    `index` is the Step's position on the ladder, starting at 0. It alone
+    opens the presets; `seconds` is None when the screen is merely opened,
+    otherwise it names the duration the Admin just picked (§6, 0 = forever).
+    """
+
+    chat_id: int
+    index: int
+    seconds: int | None = None
+
+
+class LadderEditCallback(CallbackData, prefix="chat-ladder-edit"):
+    """+ Add step / 🔴 Remove last on the Penalty Ladder screen (§13, §6).
+
+    `edit` names what was pressed: `add` appends a Step, `remove` drops the
+    last one. The ladder never leaves 1-10 Steps (§6).
+    """
+
+    chat_id: int
+    edit: str
+
+
+class ExpiryCallback(CallbackData, prefix="chat-expiry"):
+    """An Expiry preset on the Penalty Ladder screen (§6, §13).
+
+    `seconds` is the period the Admin just picked; `0` means never (§12
+    stores None for it, but callback data needs a plain integer).
+    """
+
+    chat_id: int
+    seconds: int
+
+
 class EnableAutoCallback(CallbackData, prefix="enable-auto"):
     """🟢 Enable auto-moderation (§13): after Linking, or from the summary.
 

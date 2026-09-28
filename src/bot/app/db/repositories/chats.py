@@ -121,7 +121,7 @@ class ChatRepository:
         await self.session.flush()
 
     async def set_ladder(self, chat_id: int, ladder: tuple[int, ...]) -> None:
-        """The chat's Penalty Ladder (§6, §12): 1–10 Steps in seconds, 0 = forever.
+        """The chat's Penalty Ladder (§6, §12): 1-10 Steps in seconds, 0 = forever.
 
         Only the `chat` row changes: existing Violations keep the Step,
         Restriction and Expiry they were recorded with, and the new ladder

@@ -1,7 +1,7 @@
 """Ladder-edit rules (§6): the shapes a Penalty Ladder edit may take.
 
-The Penalty Ladder screen offers duration presets per Step, ➕ Add step and
-🔴 Remove last. The ladder is always 1–10 Steps long; the buttons that would
+The Penalty Ladder screen offers duration presets per Step, + Add step and
+🔴 Remove last. The ladder is always 1-10 Steps long; the buttons that would
 break that limit are `disabled` instead. No Telegram, no DB, no I/O.
 """
 
@@ -29,13 +29,13 @@ EXPIRY_PRESETS: tuple[int | None, ...] = (
     None,  # never
 )
 
-#: The ladder is always 1–10 Steps long (§6).
+#: The ladder is always 1-10 Steps long (§6).
 MIN_STEPS = 1
 MAX_STEPS = 10
 
 
 def can_add(ladder: tuple[int, ...] | list[int]) -> bool:
-    """Whether ➕ Add step is enabled: the ladder has room below 10 Steps."""
+    """Whether + Add step is enabled: the ladder has room below 10 Steps."""
     return len(ladder) < MAX_STEPS
 
 
@@ -58,9 +58,7 @@ def remove_last(ladder: tuple[int, ...] | list[int]) -> tuple[int, ...]:
     return tuple(ladder[:-1])
 
 
-def set_step(
-    ladder: tuple[int, ...] | list[int], index: int, duration: int
-) -> tuple[int, ...]:
+def set_step(ladder: tuple[int, ...] | list[int], index: int, duration: int) -> tuple[int, ...]:
     """Replace one Step's duration; anything out of range comes back unchanged.
 
     Only a preset duration lands: the screen offers buttons, never free text.

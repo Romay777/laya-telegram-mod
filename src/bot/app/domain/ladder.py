@@ -12,6 +12,9 @@ from datetime import datetime, timedelta
 MIN_TIMED_SECONDS = 30
 MAX_TIMED_SECONDS = 366 * 24 * 60 * 60
 
+#: The stored encoding of a forever Step: 0 seconds (§12).
+FOREVER_SECONDS = 0
+
 
 def select_step(ladder: tuple[int, ...] | list[int], *, active_count: int) -> tuple[int, int]:
     """The Step of the `active_count`-th Active Violation: its index and seconds.

@@ -26,6 +26,8 @@ from app.menu.screens import (
     enter_chat_screen,
     home_screen,
     how_it_works_screen,
+    ladder_screen,
+    ladder_step_screen,
     language_screen,
     link_expired_screen,
     link_failed_screen,
@@ -218,6 +220,58 @@ class MenuNavigator:
                 chat_title,
                 chat_id=chat_id,
                 chat_language=chat_language,
+            ),
+        )
+
+    async def show_ladder(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        ladder: Sequence[int],
+        expiry_seconds: int | None,
+        locale: str,
+    ) -> None:
+        """The Penalty Ladder of one chat (§6, §13): Steps, Add/Remove, Expiry."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=ladder_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                ladder=tuple(ladder),
+                expiry_seconds=expiry_seconds,
+            ),
+        )
+
+    async def show_ladder_step(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        index: int,
+        seconds: int,
+        locale: str,
+    ) -> None:
+        """One Step's duration presets (§6, §13)."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=ladder_step_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                index=index,
+                seconds=seconds,
             ),
         )
 

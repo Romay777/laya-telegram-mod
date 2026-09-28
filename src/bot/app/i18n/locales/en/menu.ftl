@@ -51,4 +51,16 @@ menu-alerts-last-appeal-warning = Members won't be able to appeal
 menu-categories-text = What {$chat} is checked for. The model is always asked about everything; switched-off kinds are ignored when a message is judged.
 menu-sensitivity-text = How sure the check must be before a message counts. Strict catches more and misfires more.
 menu-chat-language-text = The language of this chat's notices and buttons. It is independent of your own interface language.
+menu-chat-ladder = Penalty Ladder
+menu-ladder-text = The Steps a Member climbs with each violation, and how long a violation stays counted. Changes apply from the next violation.
+menu-ladder-step = Step {$step}: {$duration}
+menu-ladder-step-text = How long Step {$step} restricts a Member.
+menu-ladder-add-step = ➕ Add step
+menu-ladder-remove-last = 🔴 Remove last
+menu-ladder-expiry-7d = 7 days
+menu-ladder-expiry-14d = 14 days
+menu-ladder-expiry-30d = 30 days
+menu-ladder-expiry-60d = 60 days
+menu-ladder-expiry-90d = 90 days
+menu-ladder-expiry-never = never
 

@@ -17,6 +17,7 @@ from app.config import SENSITIVITIES
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
+from app.domain import ladder_edits
 from app.i18n import SUPPORTED_LANGUAGES, translator_for
 from app.linking.admin_cache import AdminCache
 from app.linking.service import FallbackLinkStates, LinkingService
@@ -27,7 +28,11 @@ from app.menu.callbacks import (
     ChatModeCallback,
     ChatSettingsCallback,
     EnableAutoCallback,
+    ExpiryCallback,
     JournalCallback,
+    LadderCallback,
+    LadderEditCallback,
+    LadderStepCallback,
     MenuAction,
     MenuCallback,
     MyAlertsCallback,
@@ -39,6 +44,10 @@ from app.menu.screens.home import ChatSummary
 
 #: The §13 default: the choice offered right after Linking waits 2 days.
 DEFAULT_SUMMARY_AFTER_H = 48
+
+#: The duration a freshly appended Step starts at: 30 days, the largest
+#: timed preset, so a new Step never surprises with a short mute.
+NEW_STEP_SECONDS = 30 * 86400
 
 
 def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Router:
@@ -408,6 +417,174 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             chat_id=chat.chat_id,
             chat_title=chat.title,
             chat_language=await _current_chat_language(session, chat.chat_id),
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(LadderCallback.filter(), F.message.chat.type == "private")
+    async def ladder(
+        callback: CallbackQuery,
+        callback_data: LadderCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """The Penalty Ladder screen (§6, §13): the Steps, Add/Remove, Expiry."""
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        await navigator.show_ladder(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            ladder=tuple(chat.ladder),
+            expiry_seconds=chat.expiry_seconds,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(LadderStepCallback.filter(), F.message.chat.type == "private")
+    async def ladder_step(
+        callback: CallbackQuery,
+        callback_data: LadderStepCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """One Step's duration presets (§6, §13); a pick is stored at once."""
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        if callback_data.seconds is None:
+            # The screen was merely opened: show the Step's duration presets.
+            await navigator.show_ladder_step(
+                bot=bot,
+                session=session,
+                user=bot_user,
+                chat_id=chat.chat_id,
+                chat_title=chat.title,
+                index=callback_data.index,
+                seconds=chat.ladder[callback_data.index],
+                locale=i18n.locale,
+            )
+            await callback.answer()
+            return
+
+        ladder = ladder_edits.set_step(
+            tuple(chat.ladder), callback_data.index, callback_data.seconds
+        )
+        await ChatRepository(session).set_ladder(chat.chat_id, ladder)
+        await navigator.show_ladder(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            ladder=ladder,
+            expiry_seconds=chat.expiry_seconds,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(LadderEditCallback.filter(), F.message.chat.type == "private")
+    async def ladder_edit(
+        callback: CallbackQuery,
+        callback_data: LadderEditCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """+ Add step appends one; 🔴 Remove last drops the last (§6, §13).
+
+        The ladder is always 1-10 Steps: the disabled buttons keep the Admin
+        inside the limit, and the domain rules refuse it again here.
+        """
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        ladder = tuple(chat.ladder)
+        if callback_data.edit == "add":
+            ladder = ladder_edits.add_step(ladder, NEW_STEP_SECONDS)
+        elif callback_data.edit == "remove":
+            ladder = ladder_edits.remove_last(ladder)
+        await ChatRepository(session).set_ladder(chat.chat_id, ladder)
+        await navigator.show_ladder(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            ladder=ladder,
+            expiry_seconds=chat.expiry_seconds,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(ExpiryCallback.filter(), F.message.chat.type == "private")
+    async def expiry(
+        callback: CallbackQuery,
+        callback_data: ExpiryCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """An Expiry preset (§6, §13): when a Violation stops being Active.
+
+        The period counts per Violation from when it was recorded; `never`
+        means no expiry. The change applies from the next Violation — it
+        never touches the recorded ones and never lifts a Restriction.
+        """
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        stored_expiry = None if callback_data.seconds == 0 else callback_data.seconds
+        await ChatRepository(session).set_expiry(chat.chat_id, stored_expiry)
+        await navigator.show_ladder(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            ladder=tuple(chat.ladder),
+            expiry_seconds=stored_expiry,
             locale=i18n.locale,
         )
         await callback.answer()
