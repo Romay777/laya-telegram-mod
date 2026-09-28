@@ -6,7 +6,7 @@ One entry point per way the flow moves:
   and return the startgroup deep link.
 - `handle_promotion` — a `my_chat_member` update promoted the bot: run the
   checks, then link or report what is missing.
-- `check_against` — the Admin pressed 🔵 Check again on the failure screen.
+- `check_again` — the Admin pressed 🔵 Check again on the failure screen.
 - `complete_pending_start` — the Linker who never started the bot just did.
 """
 
@@ -30,7 +30,7 @@ from app.db.repositories.chats import ChatRepository
 from app.db.repositories.link_intents import LinkIntentRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.db.repositories.users import BotUserRepository
-from app.domain.linking import linking_problems
+from app.domain.linking import LinkingProblems, linking_problems
 from app.i18n import guess_locale, translator_for
 from app.linking.deep_link import INTENT_TTL, startgroup_url
 from app.menu.navigator import MenuNavigator
@@ -65,7 +65,6 @@ class LinkingService:
         core: BaseCore,
         prompt_delete_after_s: float = 600.0,
     ) -> None:
-        self._session_maker = session_maker
         self._clock = clock
         self._core = core
         self._storage = PostgresStorage(session_maker)
@@ -83,7 +82,7 @@ class LinkingService:
         )
         return startgroup_url(cast(str, me.username), token)
 
-    def delete_prompt_later(self, bot: Bot, chat_id: int, message_id: int) -> None:
+    def _delete_prompt_later(self, bot: Bot, chat_id: int, message_id: int) -> None:
         """Delete the group prompt after its 10 minutes (§10 step 6).
 
         In-process on purpose: when the scheduler (§11) lands, this due
@@ -137,12 +136,7 @@ class LinkingService:
             linker_status=linker_status,
             linker_first_name=event.from_user.first_name,
         )
-        problems = linking_problems(
-            chat_type=facts.chat_type,
-            can_delete_messages=facts.can_delete_messages,
-            can_restrict_members=facts.can_restrict_members,
-            linker_status=facts.linker_status,
-        )
+        problems = self._problems(facts)
 
         linker = await BotUserRepository(session).get(linker_id)
         locale = self._locale(linker, telegram_language_code)
@@ -174,16 +168,15 @@ class LinkingService:
         chat = await self._complete_link(
             session, facts, chat_language=linker.language or FALLBACK_LANGUAGE
         )
-        await self._show_linked(
-            bot,
-            session,
-            navigator,
-            linker,
-            facts,
-            chat.mode,
-            chat.backend,
-            chat.sensitivity,
-            locale,
+        await self._show_linked(bot, session, navigator, linker, facts, chat, locale)
+
+    def _problems(self, facts: PromotionFacts) -> LinkingProblems:
+        """The three §10 checks over one set of facts: exactly what is missing."""
+        return linking_problems(
+            chat_type=facts.chat_type,
+            can_delete_messages=facts.can_delete_messages,
+            can_restrict_members=facts.can_restrict_members,
+            linker_status=facts.linker_status,
         )
 
     async def _member_status(self, bot: Bot, chat_id: int, user_id: int) -> str | None:
@@ -194,7 +187,7 @@ class LinkingService:
             return None
         return member.status
 
-    async def check_against(
+    async def check_again(
         self,
         *,
         bot: Bot,
@@ -206,12 +199,7 @@ class LinkingService:
     ) -> None:
         """🔵 Check again from the failure screen: the same checks, live (§10 step 5)."""
         facts = await self._facts_live(bot, chat_id, user.user_id)
-        problems = linking_problems(
-            chat_type=facts.chat_type,
-            can_delete_messages=facts.can_delete_messages,
-            can_restrict_members=facts.can_restrict_members,
-            linker_status=facts.linker_status,
-        )
+        problems = self._problems(facts)
         if problems:
             await navigator.show_link_failed(
                 bot=bot,
@@ -235,17 +223,7 @@ class LinkingService:
         chat = await self._complete_link(
             session, facts, chat_language=user.language or FALLBACK_LANGUAGE
         )
-        await self._show_linked(
-            bot,
-            session,
-            navigator,
-            user,
-            facts,
-            chat.mode,
-            chat.backend,
-            chat.sensitivity,
-            locale,
-        )
+        await self._show_linked(bot, session, navigator, user, facts, chat, locale)
 
     async def _facts_live(self, bot: Bot, chat_id: int, linker_id: int) -> PromotionFacts:
         """The same facts as a promotion, read live instead of from the update."""
@@ -290,9 +268,7 @@ class LinkingService:
         navigator: MenuNavigator,
         linker: BotUser,
         facts: PromotionFacts,
-        mode: str,
-        backend: str,
-        sensitivity: str,
+        chat: Chat,
         locale: str,
     ) -> None:
         try:
@@ -301,9 +277,9 @@ class LinkingService:
                 session=session,
                 user=linker,
                 chat_title=facts.chat_title,
-                mode=mode,
-                backend=backend,
-                sensitivity=sensitivity,
+                mode=chat.mode,
+                backend=chat.backend,
+                sensitivity=chat.sensitivity,
                 locale=locale,
             )
         except TelegramForbiddenError:
@@ -317,7 +293,9 @@ class LinkingService:
         """The Linker never started the bot: prompt them in the group (§10 step 6).
 
         The pending chat is remembered under the Linker's FSM destiny, so their
-        /start can finish the linking.
+        /start can finish the linking. The prompt's locale is the Linker's
+        Telegram client language: §15 points group text at `chat_language`, but
+        no Linked Chat (and so no chat_language) exists yet.
         """
         t = translator_for(self._core, guess_locale(telegram_language_code))
         me = await bot.get_me()
@@ -333,7 +311,7 @@ class LinkingService:
             self._pending_key(bot, facts.linker_id),
             {"chat_id": facts.chat_id, "chat_title": facts.chat_title or ""},
         )
-        self.delete_prompt_later(bot, facts.chat_id, prompt.message_id)
+        self._delete_prompt_later(bot, facts.chat_id, prompt.message_id)
 
     async def complete_pending_start(
         self, *, bot: Bot, session: AsyncSession, user: BotUser
@@ -354,13 +332,7 @@ class LinkingService:
             facts = await self._facts_live(bot, int(chat_id), user.user_id)
         except TelegramAPIError:
             return  # the chat is gone or the bot was removed
-        problems = linking_problems(
-            chat_type=facts.chat_type,
-            can_delete_messages=facts.can_delete_messages,
-            can_restrict_members=facts.can_restrict_members,
-            linker_status=facts.linker_status,
-        )
-        if problems:
+        if self._problems(facts):
             return
 
         await self._complete_link(session, facts, chat_language=user.language or FALLBACK_LANGUAGE)

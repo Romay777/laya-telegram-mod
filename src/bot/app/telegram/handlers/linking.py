@@ -44,7 +44,7 @@ def create_linking_router() -> Router:
         linking: LinkingService,
         i18n: I18nContext,
     ) -> None:
-        await linking.check_against(
+        await linking.check_again(
             bot=bot,
             session=session,
             navigator=navigator,

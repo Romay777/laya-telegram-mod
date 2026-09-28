@@ -7,9 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Category, Chat, ChatCategory
 
-#: The builtin Categories every Linked Chat starts with, all enabled (§12).
-BUILTIN_CATEGORIES = ("spam", "ads", "insult")
-
 
 class ChatRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -30,7 +27,9 @@ class ChatRepository:
         """Insert the Linked Chat with the §12 defaults, or return the stored one.
 
         Column defaults carry mode, sensitivity, ladder and expiry; the caller
-        passes what Linking knows: the chat itself and the Linker.
+        passes what Linking knows: the chat itself and the Linker. Every
+        Category in the table starts enabled (§12: custom Categories are
+        reserved for later, so today that is all of them).
         """
         chat = await self.get(chat_id)
         if chat is not None:
@@ -46,8 +45,7 @@ class ChatRepository:
         self.session.add(chat)
         await self.session.flush()
 
-        enabled = select(Category.code).where(Category.code.in_(BUILTIN_CATEGORIES))
-        for (code,) in (await self.session.execute(enabled)).all():
+        for (code,) in (await self.session.execute(select(Category.code))).all():
             self.session.add(ChatCategory(chat_id=chat_id, category_code=code, enabled=True))
         await self.session.flush()
         return chat
