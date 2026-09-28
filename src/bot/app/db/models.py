@@ -8,7 +8,7 @@ table carries `chat_id` with ON DELETE CASCADE (ADR-0001).
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -133,3 +133,81 @@ class AdminSubscription(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     # all | appeals | off; the Linker gets `all` on Linking.
     alert_mode: Mapped[str] = mapped_column(String(16), default="off")
+
+
+class MessageCheck(Base):
+    """One classifier check (§12): the Verdict and probabilities, never the text."""
+
+    __tablename__ = "message_check"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE")
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    # Edits are checked again from scratch (§4); this ticket checks originals only.
+    is_edit: Mapped[bool] = mapped_column(Boolean, default=False)
+    backend: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(64))
+    spec_version: Mapped[int]
+    # clean | suspicion | violation | skipped_short | skipped_timeout |
+    # skipped_overload | skipped_unavailable (§12).
+    outcome: Mapped[str] = mapped_column(String(32))
+    category: Mapped[str | None] = mapped_column(String(32))
+    confidence: Mapped[float | None] = mapped_column(Float)
+    probabilities: Mapped[dict[str, float] | None] = mapped_column(JSONB)
+    latency_ms: Mapped[int | None]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FlaggedMessage(Base):
+    """The stored text and entities of a flagged message (§12), purged on `purge_at`."""
+
+    __tablename__ = "flagged_message"
+
+    check_id: Mapped[int] = mapped_column(
+        ForeignKey("message_check.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Both go NULL when the retention passes; the row keeps the check linkage.
+    text: Mapped[str | None] = mapped_column(Text)
+    entities: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    purge_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Violation(Base):
+    """A confirmed case of a Member's message matching a Category (§12)."""
+
+    __tablename__ = "violation"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE")
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    check_id: Mapped[int] = mapped_column(ForeignKey("message_check.id"))
+    category: Mapped[str] = mapped_column(String(32))
+    # auto | admin; admin arrives when Suspicions can be punished (§9).
+    source: Mapped[str] = mapped_column(String(16), default="auto")
+    step_index: Mapped[int]
+    # Seconds; 0 = forever, None is reserved for sender-chat bans (§12).
+    restriction_seconds: Mapped[int | None] = mapped_column(BigInteger)
+    restricted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[int | None] = mapped_column(BigInteger)
+    notice_dropped: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ChatNotice(Base):
+    """The bot's own Violation announcement, deleted at `delete_at` (§7, §12)."""
+
+    __tablename__ = "chat_notice"
+
+    violation_id: Mapped[int] = mapped_column(
+        ForeignKey("violation.id", ondelete="CASCADE"), primary_key=True
+    )
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    delete_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
