@@ -48,7 +48,11 @@ def category_toggle(
     code: str,
     enabled: bool,
 ) -> InlineKeyboardButton:
-    """One Category's toggle; the enabled ones wear the primary style (§13)."""
+    """One Category's toggle; the enabled ones wear the primary style (§13).
+
+    The Category names live in `alerts.ftl` (§9), shared with the alert
+    verdicts: one key, one translation.
+    """
     return InlineKeyboardButton(
         text=t(f"category-{code}"),
         callback_data=CategoriesCallback(chat_id=chat_id, code=code).pack(),

@@ -43,6 +43,15 @@ class FakeBotSession(BaseSession):
         """Queue an outcome for the next call of `method_type`: a result or an exception."""
         self._scripted.setdefault(method_type, []).append(outcome)
 
+    def drop_scripted(self, method_type: type[TelegramMethod]) -> None:
+        """Forget any queued outcomes for `method_type`.
+
+        A warm cache can consume no scripted answer, leaving it queued for a
+        later call it was never meant for; tests use this to realign the
+        queue after such a press.
+        """
+        self._scripted.pop(method_type, None)
+
     def call_names(self) -> list[str]:
         return [call.method_name for call in self.calls]
 

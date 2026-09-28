@@ -86,7 +86,7 @@ async def pick(app: TestApp, admin_id: int, chat_id: int, menu: int, data: str) 
     app.session.script(GetChatMember, member_owner(user(admin_id)))
     await app.feed(private_callback_update(admin_id, data, menu, language_code="en"))
     app.session.calls.clear()
-    app.session._scripted.pop(GetChatMember, None)
+    app.session.drop_scripted(GetChatMember)
 
 
 async def test_an_ads_only_chat_allows_ads(
