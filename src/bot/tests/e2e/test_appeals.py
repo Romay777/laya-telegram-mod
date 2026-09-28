@@ -11,7 +11,7 @@ from itertools import count
 
 import pytest
 from aiogram.methods import GetChat, GetChatMember
-from aiogram.types import ChatPermissions
+from aiogram.types import ChatPermissions, MessageEntity
 from app.db.models import AdminAlert, Appeal, ChatNotice, FlaggedMessage, Violation
 from app.menu.callbacks import AppealCallback, AppealDecideCallback, LiftRestrictionCallback
 from app.scheduler import Scheduler
@@ -91,13 +91,20 @@ async def fresh_notice(
         return await db.get(ChatNotice, violation_id)
 
 
-async def spam_message(app: TestApp, chat_id: int, member_id: int, message_id: int) -> None:
+async def spam_message(
+    app: TestApp, chat_id: int, member_id: int, message_id: int, *, entities: bool = False
+) -> None:
     app.backend.script(SPAMMY)
     app.session.script(GetChatMember, member_member(user(member_id)))  # the sender
     app.session.calls.clear()
     await app.feed(
         group_message_update(
-            chat_id, member_id, SPAM_TEXT, message_id=message_id, sender_name="Spammer"
+            chat_id,
+            member_id,
+            SPAM_TEXT,
+            message_id=message_id,
+            sender_name="Spammer",
+            entities=[MessageEntity(type="bold", offset=4, length=5)] if entities else None,
         )
     )
 
@@ -155,7 +162,8 @@ async def test_filing_an_appeal_tells_the_admins_and_calms_the_notice(
     app: TestApp, admin_id: int, member_id: int, chat_id: int
 ) -> None:
     await auto_moderation_chat(app, admin_id, chat_id)
-    await spam_message(app, chat_id, member_id, message_id=77)
+    # The flagged message carries formatting of its own (§8: entities kept).
+    await spam_message(app, chat_id, member_id, message_id=77, entities=True)
     notice = app.session.calls_of("SendMessage")[0]
     violation = await the_violation(app.session_maker)
     app.session.calls.clear()
@@ -189,6 +197,10 @@ async def test_filing_an_appeal_tells_the_admins_and_calms_the_notice(
     assert SPAM_TEXT in text  # the deleted message, quoted with its entities (§8)
     entities = alert.method.entities or []
     assert any(entity.type == "blockquote" for entity in entities)
+    (bold,) = [entity for entity in entities if entity.type == "bold"]
+    # Entity offsets are UTF-16 code units, not Python indices (§14).
+    units = (alert.method.text or "").encode("utf-16-le")
+    assert units[bold.offset * 2 : (bold.offset + bold.length) * 2].decode("utf-16-le") == "cheap"
     (row,) = alert.method.reply_markup.inline_keyboard
     assert [button.text for button in row] == ["🟢 Lift restriction", "🔴 Reject"]
     lift, reject = row

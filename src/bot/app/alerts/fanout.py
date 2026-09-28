@@ -1,11 +1,12 @@
-"""Admin Alert fan-out (§9): a Violation reaches every subscribed Admin.
+"""Admin Alert fan-out (§9): Violations and Appeals reach their subscribers.
 
 Recipients are the chat's current Admins (Telegram is the source of Admin
-status, checked through the AdminCache) whose alert mode for the chat is
-`all`. Each alert goes out as a private message in that Admin's language,
-paced about one message per second per Admin; a 403 marks the Admin
-unreachable and they are skipped from then on. Every sent message is
-recorded in `admin_alert`, so any decision can later edit every copy.
+status, checked through the AdminCache) whose alert mode includes the
+subject — Violations go to `all`, Appeals to `all` and `appeals`. Each
+alert goes out as a private message in that Admin's language, paced about
+one message per second per Admin; a 403 marks the Admin unreachable and
+they are skipped from then on. Every sent message is recorded in
+`admin_alert`, so any decision can later edit every copy.
 """
 
 import asyncio
@@ -118,7 +119,6 @@ class AlertFanout:
         async for admin_id, _user, t in self._recipients(
             bot, session, admin_cache, chat, recipients
         ):
-            await self._pace_for(admin_id)
             text, entities = render_violation_alert(
                 t,
                 chat_title=chat.title or str(chat.chat_id),
@@ -129,22 +129,15 @@ class AlertFanout:
                 flagged_text=flagged_text,
                 flagged_entities=flagged_entities,
             )
-            try:
-                message = await bot.send_message(
-                    chat_id=admin_id,
-                    text=text,
-                    entities=[MessageEntity.model_validate(entity) for entity in entities],
-                    reply_markup=lift_keyboard(t, chat.chat_id, violation_id),
-                )
-            except TelegramForbiddenError:
-                await BotUserRepository(session).mark_unreachable(
-                    admin_id, started_at=self._clock.now()
-                )
-                continue
-            await AlertRepository(session).record_alert(
-                chat.chat_id,
+            await self._send_alert(
+                bot,
+                session,
+                chat=chat,
                 admin_id=admin_id,
-                message_id=message.message_id,
+                t=t,
+                text=text,
+                entities=entities,
+                markup=lift_keyboard(t, chat.chat_id, violation_id),
                 subject_type="violation",
                 subject_id=violation_id,
             )
@@ -171,7 +164,6 @@ class AlertFanout:
         async for admin_id, _user, t in self._recipients(
             bot, session, admin_cache, chat, subscribers
         ):
-            await self._pace_for(admin_id)
             text, entities = render_appeal_alert(
                 t,
                 chat_title=chat.title or str(chat.chat_id),
@@ -182,25 +174,54 @@ class AlertFanout:
                 flagged_text=flagged_text,
                 flagged_entities=flagged_entities,
             )
-            try:
-                message = await bot.send_message(
-                    chat_id=admin_id,
-                    text=text,
-                    entities=[MessageEntity.model_validate(entity) for entity in entities],
-                    reply_markup=appeal_keyboard(t, chat.chat_id, appeal_id),
-                )
-            except TelegramForbiddenError:
-                await BotUserRepository(session).mark_unreachable(
-                    admin_id, started_at=self._clock.now()
-                )
-                continue
-            await AlertRepository(session).record_alert(
-                chat.chat_id,
+            await self._send_alert(
+                bot,
+                session,
+                chat=chat,
                 admin_id=admin_id,
-                message_id=message.message_id,
+                t=t,
+                text=text,
+                entities=entities,
+                markup=appeal_keyboard(t, chat.chat_id, appeal_id),
                 subject_type="appeal",
                 subject_id=appeal_id,
             )
+
+    async def _send_alert(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        chat: Chat,
+        admin_id: int,
+        t: GetText,
+        text: str,
+        entities: list[dict[str, Any]],
+        markup: InlineKeyboardMarkup,
+        subject_type: str,
+        subject_id: int,
+    ) -> None:
+        """One copy of an alert, paced: send it, mark 403s, record it (§9)."""
+        await self._pace_for(admin_id)
+        try:
+            message = await bot.send_message(
+                chat_id=admin_id,
+                text=text,
+                entities=[MessageEntity.model_validate(entity) for entity in entities],
+                reply_markup=markup,
+            )
+        except TelegramForbiddenError:
+            await BotUserRepository(session).mark_unreachable(
+                admin_id, started_at=self._clock.now()
+            )
+            return
+        await AlertRepository(session).record_alert(
+            chat.chat_id,
+            admin_id=admin_id,
+            message_id=message.message_id,
+            subject_type=subject_type,
+            subject_id=subject_id,
+        )
 
     async def has_appeal_recipient(
         self,

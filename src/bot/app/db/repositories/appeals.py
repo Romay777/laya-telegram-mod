@@ -26,12 +26,11 @@ class AppealRepository:
             insert(Appeal)
             .values(violation_id=violation_id, created_at=created_at)
             .on_conflict_do_nothing(index_elements=["violation_id"])
-            .returning(Appeal.id)
+            .returning(Appeal)
         )
-        if result.scalar_one_or_none() is None:
-            return None
-        appeal = await self.by_violation(violation_id)
-        assert appeal is not None  # the insert above just created it
+        appeal = result.scalar_one_or_none()
+        if appeal is not None:
+            await self.session.flush()
         return appeal
 
     async def by_violation(self, violation_id: int) -> Appeal | None:

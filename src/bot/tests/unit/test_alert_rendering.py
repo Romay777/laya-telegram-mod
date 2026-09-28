@@ -1,11 +1,11 @@
-"""Unit: the Violation Admin Alert text and entities (§9, §15).
+"""Unit: the Violation and Appeal Admin Alert texts and entities (§8, §9, §15).
 
-The alert is private-chat text, so it renders in the Admin's language. The
+An alert is private-chat text, so it renders in the Admin's language. The
 deleted message is quoted with its stored entities, which must move by the
 length of the header in UTF-16 code units — the units Telegram counts.
 """
 
-from app.alerts.rendering import render_violation_alert
+from app.alerts.rendering import render_appeal_alert, render_violation_alert
 from app.i18n import translator_for
 
 from tests.support.i18n import started_core
@@ -101,3 +101,43 @@ async def test_the_alert_renders_in_the_admins_language() -> None:
     assert text.startswith(
         "\n".join(["⚠️ Мой чат", "Участник: Аня", "Спам, 97 %", "Ограничение: 1 час", ""])
     )
+
+
+async def test_the_appeal_alert_adds_the_appeal_line_and_keeps_the_entities() -> None:
+    core = await started_core()
+
+    text, entities = render_appeal_alert(
+        translator_for(core, "en"),
+        chat_title="My Chat",
+        member_name="Ann",
+        category="spam",
+        confidence=0.97,
+        step_seconds=3600,
+        flagged_text=QUOTE,
+        flagged_entities=[{"offset": 0, "length": 3, "type": "bold"}],
+    )
+
+    assert text == f"{HEADER}\n🙋 The Member has appealed\n\n{QUOTE}"
+    shift = utf16(text[: -len(QUOTE)])
+    assert {(e["type"], e["offset"], e["length"]) for e in entities} == {
+        ("bold", shift, 3),  # the stored entity survives, moved past the header
+        ("blockquote", shift, utf16(QUOTE)),
+    }
+
+
+async def test_a_purged_appeal_says_so_instead_of_the_quote() -> None:
+    core = await started_core()
+
+    text, entities = render_appeal_alert(
+        translator_for(core, "en"),
+        chat_title="My Chat",
+        member_name="Ann",
+        category="spam",
+        confidence=0.97,
+        step_seconds=3600,
+        flagged_text=None,
+        flagged_entities=None,
+    )
+
+    assert text == f"{HEADER}\n🙋 The Member has appealed\n\nThe message text is no longer stored."
+    assert entities == []
