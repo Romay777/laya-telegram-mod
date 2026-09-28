@@ -19,13 +19,15 @@ from aiogram.types import (
 BOT_USER = User(id=42, is_bot=True, first_name="Laya Moderator", username="laya_moderator_bot")
 
 
-def _user(user_id: int, language_code: str | None) -> User:
-    return User(id=user_id, is_bot=False, first_name="Admin", language_code=language_code)
+def _user(user_id: int, language_code: str | None, username: str | None = None) -> User:
+    return User(
+        id=user_id, is_bot=False, first_name="Admin", language_code=language_code, username=username
+    )
 
 
-def user(user_id: int, language_code: str | None = None) -> User:
+def user(user_id: int, language_code: str | None = None, username: str | None = None) -> User:
     """A Telegram user for scripted getChatMember answers and the like."""
-    return _user(user_id, language_code)
+    return _user(user_id, language_code, username)
 
 
 def _private_chat_message(
@@ -95,13 +97,14 @@ def private_callback_update(
     data: str,
     message_id: int,
     language_code: str | None,
+    username: str | None = None,
 ) -> Update:
-    """A callback button press on the Menu message."""
+    """A callback button press on the Menu message (or on an Admin Alert copy)."""
     return Update(
         update_id=0,
         callback_query=CallbackQuery(
             id="cb1",
-            from_user=_user(user_id, language_code),
+            from_user=_user(user_id, language_code, username),
             chat_instance="test-instance",
             message=_private_chat_message(user_id, message_id, language_code),
             data=data,

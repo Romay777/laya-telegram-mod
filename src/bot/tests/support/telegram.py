@@ -10,6 +10,7 @@ from aiogram.types import (
     ChatMemberAdministrator,
     ChatMemberMember,
     ChatMemberOwner,
+    ChatPermissions,
     User,
 )
 
@@ -49,7 +50,12 @@ def member_member(user: User) -> ChatMemberMember:
     return ChatMemberMember(user=user, status="member")
 
 
-def chat_facts(chat_id: int, chat_type: str, title: str | None = None) -> ChatFullInfo:
+def chat_facts(
+    chat_id: int,
+    chat_type: str,
+    title: str | None = None,
+    permissions: ChatPermissions | None = None,
+) -> ChatFullInfo:
     """A `getChat` answer: what the Check-again re-check needs to know."""
     return ChatFullInfo(
         id=chat_id,
@@ -64,6 +70,7 @@ def chat_facts(chat_id: int, chat_type: str, title: str | None = None) -> ChatFu
             premium_subscription=False,
             gifts_from_channels=False,
         ),
+        permissions=permissions,
     )
 
 

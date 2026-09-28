@@ -9,7 +9,7 @@ are safe across restarts.
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Chat, ChatNotice, FlaggedMessage, MessageCheck, Violation
@@ -118,6 +118,29 @@ class ModerationRepository:
             )
             or 0
         )
+
+    async def revoke_violation(self, violation_id: int, *, by: int, at: datetime) -> bool:
+        """Turn a Violation into a False Positive (§6): first click wins (§9).
+
+        The conditional update fires only while the Violation still stands,
+        so of several Admins lifting the same Restriction exactly the first
+        one revokes it, and records who and when.
+        """
+        result = await self.session.execute(
+            update(Violation)
+            .where(Violation.id == violation_id, Violation.revoked_at.is_(None))
+            .values(revoked_at=at, revoked_by=by)
+        )
+        if not result.rowcount:
+            return False
+        # The conditional UPDATE bypasses the session's identity map; keep the
+        # session's copy of the row in step with what was written.
+        row = await self.session.get(Violation, violation_id)
+        if row is not None:
+            row.revoked_at = at
+            row.revoked_by = by
+        await self.session.flush()
+        return True
 
     async def save_notice(
         self, violation_id: int, *, message_id: int, delete_at: datetime

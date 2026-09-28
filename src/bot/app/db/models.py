@@ -196,6 +196,20 @@ class Violation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class AdminAlert(Base):
+    """One sent Admin Alert message, recorded so every copy can be edited (§9, §12)."""
+
+    __tablename__ = "admin_alert"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"))
+    admin_id: Mapped[int] = mapped_column(BigInteger)
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    # violation | suspicion | appeal (§12).
+    subject_type: Mapped[str] = mapped_column(String(16))
+    subject_id: Mapped[int] = mapped_column()
+
+
 class ChatNotice(Base):
     """The bot's own Violation announcement, deleted at `delete_at` (§7, §12)."""
 

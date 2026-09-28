@@ -21,3 +21,13 @@ class BotUserRepository:
             self.session.add(user)
             await self.session.flush()
         return user
+
+    async def mark_unreachable(self, user_id: int, *, started_at: datetime) -> None:
+        """A 403 while messaging the Admin: they can't be reached (§9).
+
+        The row is created if the Admin never started the bot — the mark
+        must survive either way, so the bot stops trying.
+        """
+        user = await self.get_or_create(user_id, started_at=started_at)
+        user.reachable = False
+        await self.session.flush()

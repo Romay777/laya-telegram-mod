@@ -42,12 +42,16 @@ def render_notice(
         "notice-violation",
         user=name,
         reason=t(f"notice-reason-{category}"),
-        duration=_duration_text(t, step_seconds),
+        duration=duration_text(t, step_seconds),
     )
 
 
-def _duration_text(t: GetText, step_seconds: int) -> str:
-    """A Step as text: the largest unit that fits, with plural forms (§14)."""
+def duration_text(t: GetText, step_seconds: int) -> str:
+    """A Step as text: the largest unit that fits, with plural forms (§14).
+
+    Shared with the Admin Alerts: the same Fluent plural forms serve any
+    private-chat language.
+    """
     if step_seconds <= 0:
         return t("notice-duration-forever")
     if step_seconds % _DAY == 0:

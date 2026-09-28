@@ -58,3 +58,13 @@ class ChatModeCallback(CallbackData, prefix="chat-mode"):
     """The Mode switch (§13): Observation Mode ↔ Auto-moderation."""
 
     chat_id: int
+
+
+class LiftRestrictionCallback(CallbackData, prefix="lift"):
+    """🟢 Lift restriction on a Violation's Admin Alert copy (§9).
+
+    Carries the `chat_id` so the handler can re-check Admin access (§13).
+    """
+
+    chat_id: int
+    violation_id: int

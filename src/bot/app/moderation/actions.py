@@ -1,8 +1,8 @@
-"""Moderation actions over the Bot API (§2, §6): delete, restrict.
+"""Moderation actions over the Bot API (§2, §6): delete, restrict, lift.
 
-Lifting a Restriction and banning a sender chat arrive with their tickets.
-Deleting tolerates a message that is already gone (§6); a failed
-Restriction means the chat is Suspended (§10) and is that ticket's business.
+Banning a sender chat arrives with its ticket. Deleting tolerates a message
+that is already gone (§6); a failed Restriction means the chat is Suspended
+(§10) and is that ticket's business.
 """
 
 import contextlib
@@ -46,4 +46,21 @@ async def restrict_member(
         ),
         until_date=int(restricted_until.timestamp()) if restricted_until else 0,
         use_independent_chat_permissions=True,
+    )
+
+
+async def lift_restriction(
+    bot: Bot, chat_id: int, user_id: int, *, permissions: ChatPermissions
+) -> None:
+    """Give the Member back the chat's normal permissions (§6).
+
+    `permissions` are the chat's own defaults, read with `getChat`; a chat
+    that reports none is treated as allowing nothing beyond Telegram's
+    baseline. `until_date = 0`: no timed Restriction on the way back.
+    """
+    await bot.restrict_chat_member(
+        chat_id=chat_id,
+        user_id=user_id,
+        permissions=permissions,
+        until_date=0,
     )

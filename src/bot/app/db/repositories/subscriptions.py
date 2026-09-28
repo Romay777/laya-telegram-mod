@@ -1,5 +1,6 @@
 """Repository for `admin_subscription` rows (§12): who gets which Admin Alerts."""
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,3 +21,17 @@ class AdminSubscriptionRepository:
             )
         )
         await self.session.flush()
+
+    async def get_mode(self, chat_id: int, user_id: int) -> str:
+        """The Admin's alert mode for the chat; other Admins default to Off (§9)."""
+        row = await self.session.get(AdminSubscription, (chat_id, user_id))
+        return row.alert_mode if row is not None else "off"
+
+    async def user_ids_with_mode(self, chat_id: int, *, alert_mode: str) -> list[int]:
+        """The Admins subscribed at one mode for the chat, in stable order."""
+        rows = await self.session.scalars(
+            select(AdminSubscription.user_id)
+            .where(AdminSubscription.chat_id == chat_id, AdminSubscription.alert_mode == alert_mode)
+            .order_by(AdminSubscription.user_id)
+        )
+        return list(rows)

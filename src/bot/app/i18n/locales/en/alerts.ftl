@@ -1,0 +1,11 @@
+alert-violation-header = ⚠️ {$chat}
+alert-violation-member = Member: {$member}
+alert-violation-verdict = {$category}, {$confidence}%
+alert-violation-step = Restriction: {$duration}
+category-spam = Spam
+category-ads = Advertising
+category-insult = Insults
+alert-text-not-stored = The message text is no longer stored.
+alert-lift-button = 🟢 Lift restriction
+alert-lifted = ✅ Restriction lifted by {$admin}
+alert-already-decided = Already decided by {$admin}
