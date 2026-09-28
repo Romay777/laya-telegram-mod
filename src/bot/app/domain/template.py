@@ -14,14 +14,21 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from app.alerts.rendering import utf16_len
-
 #: The placeholders a template may name (§14).
 PLACEHOLDERS: tuple[str, ...] = ("user", "reason", "duration", "strike")
 
 #: The worst-case render must fit in this many characters (§14), counted the
 #: way Telegram counts: UTF-16 code units.
 MAX_RENDER_U16 = 1024
+
+
+def utf16_len(text: str) -> int:
+    """The length of `text` in UTF-16 code units — the offsets Telegram counts.
+
+    Pure string math, so it lives in the domain: both the template renderer
+    and the alert renderer need it, and the domain imports nothing (§2).
+    """
+    return len(text.encode("utf-16-le")) // 2
 
 
 class TemplateError(Exception):

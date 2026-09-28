@@ -8,13 +8,17 @@ by UTF-16 code units, the offsets Telegram counts. No Telegram, no DB.
 
 from typing import Any
 
+from app.domain.template import utf16_len
 from app.i18n import GetText
-from app.notices.sender import duration_text
+from app.notices.durations import duration_text
 
-
-def utf16_len(text: str) -> int:
-    """The length of `text` in UTF-16 code units."""
-    return len(text.encode("utf-16-le")) // 2
+__all__ = [
+    "message_link",
+    "render_appeal_alert",
+    "render_suspicion_alert",
+    "render_violation_alert",
+    "utf16_len",
+]
 
 
 def message_link(chat_id: int, message_id: int) -> str:

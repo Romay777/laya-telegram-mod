@@ -26,6 +26,7 @@ from app.clock import Clock
 from app.db.models import Chat, FlaggedMessage, MessageCheck, Suspicion
 from app.db.repositories.alerts import AlertRepository
 from app.db.repositories.moderation import ModerationRepository
+from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.suspicions import SuspicionRepository
 from app.i18n import translator_for
 from app.linking.admin_cache import AdminCache
@@ -159,10 +160,12 @@ async def _apply_punishment(
     await session.commit()
     # §6 step 4: the Chat Notice goes through the rate-limited queue (§7),
     # with its 🙋 button only while an Appeal would reach an Admin — the
-    # same rule the pipeline applies.
+    # same rule the pipeline applies. The template (§14) is read here, from
+    # this session, so the drain posts without a DB stop first.
     appeal_recipient = await fanout.has_appeal_recipient(
         bot, session, admin_cache=admin_cache, chat=chat
     )
+    template = await NoticeTemplateRepository(session).get(chat.chat_id)
     notices.enqueue(
         violation_notice(
             session_maker=session_maker,
@@ -172,6 +175,7 @@ async def _apply_punishment(
             fanout=fanout,
             chat=chat,
             violation=violation,
+            member_id=suspicion.user_id,
             member_name=await _member_name(bot, chat.chat_id, suspicion.user_id),
             category=violation.category,
             confidence=check.confidence if check is not None else 0.0,
@@ -179,6 +183,8 @@ async def _apply_punishment(
             flagged_entities=flagged.entities if flagged is not None else None,
             max_lifetime_h=max_notice_lifetime_h,
             appeal_violation_id=violation.id if appeal_recipient else None,
+            template_text=template.text if template is not None else None,
+            template_entities=template.entities if template is not None else None,
         )
     )
     return not too_old

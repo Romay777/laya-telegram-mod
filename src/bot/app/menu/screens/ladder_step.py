@@ -12,7 +12,7 @@ from app.i18n import GetText
 from app.menu.callbacks import LadderCallback, LadderStepCallback
 from app.menu.screen import Screen
 from app.menu.screens.buttons import PRIMARY
-from app.notices.sender import duration_text
+from app.notices.durations import duration_text
 
 
 def ladder_step_screen(

@@ -27,6 +27,7 @@ from app.clock import Clock
 from app.db.models import Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.moderation import ModerationRepository
+from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.suspicions import SuspicionRepository
 from app.domain.decision import decide
 from app.linking.admin_cache import AdminCache
@@ -193,12 +194,14 @@ class ModerationPipeline:
         await session.commit()
         # §6 steps 4-5: the Chat Notice goes into the per-chat rate-limited
         # queue (§7) — deleting and restricting above already happened, and
-        # the Admin Alerts below do not wait for it. The 🙋 button is on the
-        # notice only while an Appeal would reach an Admin (§7); a channel
-        # sender gets no button either way (§4).
+        # the Admin Alerts below do not wait for it. The template (§14) and
+        # the 🙋 button are decided here: the 🙋 button is on the notice only
+        # while an Appeal would reach an Admin (§7); a channel sender gets
+        # no button either way (§4).
         appeal_recipient = await self._fanout.has_appeal_recipient(
             bot, session, admin_cache=admin_cache, chat=chat
         )
+        template = await NoticeTemplateRepository(session).get(chat.chat_id)
         self._notices.enqueue(
             violation_notice(
                 session_maker=self._session_maker,
@@ -208,6 +211,7 @@ class ModerationPipeline:
                 fanout=self._fanout,
                 chat=chat,
                 violation=violation,
+                member_id=sender.id,
                 member_name=sender.first_name or str(sender.id),
                 category=decision.category,
                 confidence=decision.confidence,
@@ -215,6 +219,8 @@ class ModerationPipeline:
                 flagged_entities=entities,
                 max_lifetime_h=self._max_notice_lifetime_h,
                 appeal_violation_id=violation.id if appeal_recipient else None,
+                template_text=template.text if template is not None else None,
+                template_entities=template.entities if template is not None else None,
             )
         )
         await self._fanout.violation_alert(

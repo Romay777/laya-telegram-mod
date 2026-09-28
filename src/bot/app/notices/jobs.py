@@ -1,11 +1,12 @@
 """The Chat Notice job of a Violation (§6 step 4, §7): what the queue sends.
 
 Both Violation producers — the moderation pipeline (§4) and a punished
-Suspicion (§9) — hand the queue the same shaped job. `send` posts the
-notice in the Chat Language and records it with its removal time;
-`on_dropped` marks the Violation `notice_dropped` — no Appeal is possible
-(§7) — and appends "notice not sent (rate limit)" to every copy of its
-Violation Admin Alert.
+Suspicion (§9) — hand the queue the same shaped job. The chat's Notice
+Template (§14) is read by the producer, before enqueueing, so the drain
+posts the notice without a DB stop first. `send` posts the notice in the
+Chat Language and records it with its removal time; `on_dropped` marks the
+Violation `notice_dropped` — no Appeal is possible (§7) — and appends
+"notice not sent (rate limit)" to every copy of its Violation Admin Alert.
 """
 
 from typing import Any
@@ -31,6 +32,7 @@ def violation_notice(
     fanout: AlertFanout,
     chat: Chat,
     violation: Violation,
+    member_id: int,
     member_name: str,
     category: str,
     confidence: float,
@@ -38,13 +40,16 @@ def violation_notice(
     flagged_entities: list[dict[str, Any]] | None,
     max_lifetime_h: int,
     appeal_violation_id: int | None,
+    template_text: str | None = None,
+    template_entities: list[dict[str, Any]] | None = None,
 ) -> PendingNotice:
     """The queue's job for one Violation's Chat Notice, enqueued now (§7).
 
     The closures run later, from the queue's drain — long after the request
-    session is gone — so each opens its own session. The appeal button is
-    part of the job: the producers decide, before enqueueing, whether an
-    Appeal would reach an Admin (§7).
+    session is gone — so each opens its own session. The template and the
+    appeal button are part of the job: the producers decide, before
+    enqueueing, whether an Appeal would reach an Admin (§7) and read the
+    template while their own session is open.
     """
 
     async def send() -> None:
@@ -55,8 +60,16 @@ def violation_notice(
                 chat_id=chat.chat_id,
                 chat_language=chat.chat_language,
                 name=member_name,
+                member_id=member_id,
                 category=category,
                 step_seconds=violation.restriction_seconds or 0,
+                # {strike} is N/M (§14): the Violation being announced counts,
+                # capped at the ladder length once the last Step repeats —
+                # which is exactly the recorded Step's position + 1.
+                strike=violation.step_index + 1,
+                ladder_len=len(chat.ladder),
+                template_text=template_text,
+                template_entities=template_entities,
                 appeal_violation_id=appeal_violation_id,
             )
             await ModerationRepository(session).save_notice(

@@ -1,50 +1,30 @@
 """Chat Notice rendering and sending (§7).
 
-The text is the default one in the Chat Language — the Notice Template of
-§14 arrives with its own ticket. `{duration}` comes from the Fluent plural
-forms, so `1 час`, `3 часа`, `5 часов` and "forever" / "навсегда" are all
-correct without code per case.
-
-The Appeal button is left out while no Admin of the chat receives Appeals;
-the caller decides and passes the Violation id only then (§7, §8).
+The text is the chat's Notice Template when one is stored (§14), and the
+default one in the Chat Language otherwise — the rendering lives in
+`template_render`, the sending here. The producer reads the template from
+its own session and hands it over with the job, so the queue's drain posts
+without a DB stop first. The Appeal button is left out while no Admin of
+the chat receives Appeals; the caller decides and passes the Violation id
+only then (§7, §8).
 """
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, MessageEntity
 from aiogram_i18n.cores.base import BaseCore
 
 from app.i18n import GetText, translator_for
 from app.menu.callbacks import AppealCallback
+from app.notices.template_render import render_notice, render_template_notice
+
+__all__ = ["appeal_keyboard", "removal_time", "render_notice", "send_notice"]
 
 #: The default text lives longer than a forever Restriction (§7): the notice
 #: is removed `max_lifetime_h` after posting when the Restriction never ends.
 DEFAULT_MAX_LIFETIME_H = 24
-
-_MINUTE = 60
-_HOUR = 3600
-_DAY = 86400
-
-
-def render_notice(
-    t: GetText,
-    *,
-    name: str,
-    category: str,
-    step_seconds: int,
-) -> str:
-    """The default Chat Notice (§7), as pure rendering.
-
-    `t` is a translator bound to the Chat Language (§15) — the one
-    `translator_for(core, chat.chat_language)` returns.
-    """
-    return t(
-        "notice-violation",
-        user=name,
-        reason=t(f"notice-reason-{category}"),
-        duration=duration_text(t, step_seconds),
-    )
 
 
 def appeal_keyboard(t: GetText, *, chat_id: int, violation_id: int) -> InlineKeyboardMarkup:
@@ -63,21 +43,6 @@ def appeal_keyboard(t: GetText, *, chat_id: int, violation_id: int) -> InlineKey
             ]
         ]
     )
-
-
-def duration_text(t: GetText, step_seconds: int) -> str:
-    """A Step as text: the largest unit that fits, with plural forms (§14).
-
-    Shared with the Admin Alerts: the same Fluent plural forms serve any
-    private-chat language.
-    """
-    if step_seconds <= 0:
-        return t("notice-duration-forever")
-    if step_seconds % _DAY == 0:
-        return t("notice-duration-days", days=step_seconds // _DAY)
-    if step_seconds % _HOUR == 0:
-        return t("notice-duration-hours", hours=step_seconds // _HOUR)
-    return t("notice-duration-minutes", minutes=max(step_seconds // _MINUTE, 1))
 
 
 def removal_time(
@@ -100,21 +65,42 @@ async def send_notice(
     chat_id: int,
     chat_language: str,
     name: str,
+    member_id: int,
     category: str,
     step_seconds: int,
+    strike: int,
+    ladder_len: int,
+    template_text: str | None = None,
+    template_entities: list[dict[str, Any]] | None = None,
     appeal_violation_id: int | None = None,
 ) -> Message:
     """Post the Chat Notice in the chat's own language (§15).
 
-    With `appeal_violation_id` the notice carries the 🙋 It's a mistake
-    button; without it — no Admin receives Appeals, the notice was dropped,
-    or the sender was a channel — the button is left out (§7).
+    The Notice Template (§14) is rendered when `template_text` is given;
+    the default text applies otherwise. With `appeal_violation_id` the
+    notice carries the 🙋 It's a mistake button; without it — no Admin
+    receives Appeals, the notice was dropped, or the sender was a channel —
+    the button is left out (§7).
     """
     t = translator_for(core, chat_language)
-    text = render_notice(t, name=name, category=category, step_seconds=step_seconds)
+    text, entities = render_template_notice(
+        t,
+        text=template_text,
+        entities=template_entities,
+        member={"user_id": member_id, "name": name},
+        category=category,
+        step_seconds=step_seconds,
+        active_violations=strike,
+        ladder_len=ladder_len,
+    )
     markup = (
         appeal_keyboard(t, chat_id=chat_id, violation_id=appeal_violation_id)
         if appeal_violation_id is not None
         else None
     )
-    return await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
+    return await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        entities=[MessageEntity.model_validate(entity) for entity in entities],
+        reply_markup=markup,
+    )

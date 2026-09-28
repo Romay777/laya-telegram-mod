@@ -19,7 +19,7 @@ from app.menu.callbacks import (
 )
 from app.menu.screen import Screen
 from app.menu.screens.buttons import DANGER, PRIMARY
-from app.notices.sender import duration_text
+from app.notices.durations import duration_text
 
 
 def ladder_screen(
