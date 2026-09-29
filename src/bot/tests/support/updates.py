@@ -158,17 +158,171 @@ def group_message_update(
     sender_name: str = "Member",
     from_bot: bool = False,
     entities: list[MessageEntity] | None = None,
+    date: datetime | None = None,
 ) -> Update:
     """A text message from a Member of a Linked Chat (or from a bot in it)."""
     return Update(
         update_id=0,
         message=Message(
             message_id=message_id,
-            date=datetime.now(UTC),
+            date=date or datetime.now(UTC),
             chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
             from_user=User(id=sender_id, is_bot=from_bot, first_name=sender_name),
             text=text,
             entities=entities,
+        ),
+    )
+
+
+def group_edited_message_update(
+    chat_id: int,
+    sender_id: int,
+    text: str,
+    *,
+    message_id: int,
+    edit_date: datetime,
+    date: datetime | None = None,
+    sender_name: str = "Member",
+) -> Update:
+    """An `edited_message` update: the message's new text (§4: re-checked)."""
+    return Update(
+        update_id=0,
+        edited_message=Message(
+            message_id=message_id,
+            date=date or datetime.now(UTC),
+            # aiogram models Telegram's unix-time `edit_date` as an int.
+            edit_date=int(edit_date.timestamp()),
+            chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            from_user=User(id=sender_id, is_bot=False, first_name=sender_name),
+            text=text,
+        ),
+    )
+
+
+def group_caption_update(
+    chat_id: int,
+    sender_id: int,
+    caption: str,
+    *,
+    message_id: int,
+    caption_entities: list[MessageEntity] | None = None,
+    sender_name: str = "Member",
+) -> Update:
+    """A photo with a caption: the caption is the message's text (§4 step 3)."""
+    return Update(
+        update_id=0,
+        message=Message(
+            message_id=message_id,
+            date=datetime.now(UTC),
+            chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            from_user=User(id=sender_id, is_bot=False, first_name=sender_name),
+            caption=caption,
+            caption_entities=caption_entities,
+        ),
+    )
+
+
+def group_media_update(
+    chat_id: int, sender_id: int, *, message_id: int, sender_name: str = "Member"
+) -> Update:
+    """A bare photo with no caption: nothing to check (§4 step 3)."""
+    return Update(
+        update_id=0,
+        message=Message(
+            message_id=message_id,
+            date=datetime.now(UTC),
+            chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            from_user=User(id=sender_id, is_bot=False, first_name=sender_name),
+        ),
+    )
+
+
+def anonymous_admin_message_update(chat_id: int, text: str, *, message_id: int) -> Update:
+    """An anonymous admin's message: `sender_chat` is the chat itself (§4)."""
+    return Update(
+        update_id=0,
+        message=Message(
+            message_id=message_id,
+            date=datetime.now(UTC),
+            chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            sender_chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            is_automatic_forward=False,
+            text=text,
+        ),
+    )
+
+
+def linked_channel_forward_update(
+    chat_id: int, linked_channel_id: int, text: str, *, message_id: int
+) -> Update:
+    """A post forwarded from the chat's linked channel (§4: automatic forward)."""
+    return Update(
+        update_id=0,
+        message=Message(
+            message_id=message_id,
+            date=datetime.now(UTC),
+            chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            sender_chat=Chat(id=linked_channel_id, type="channel", title="Linked Channel"),
+            is_automatic_forward=True,
+            text=text,
+        ),
+    )
+
+
+def foreign_channel_message_update(
+    chat_id: int, channel_id: int, text: str, *, message_id: int
+) -> Update:
+    """A message posted as a channel that is neither the chat nor its linked
+    channel — the foreign sender the §4 ban covers."""
+    return Update(
+        update_id=0,
+        message=Message(
+            message_id=message_id,
+            date=datetime.now(UTC),
+            chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            sender_chat=Chat(id=channel_id, type="channel", title="Foreign Channel"),
+            is_automatic_forward=False,
+            text=text,
+        ),
+    )
+
+
+def chat_member_update(
+    chat_id: int, user_id: int, *, status: str = "member", name: str = "Member"
+) -> Update:
+    """A `chat_member` update: one Member's status changed (§4 step 1)."""
+    old = ChatMemberMember(user=User(id=user_id, is_bot=False, first_name=name), status="member")
+    new_member: ChatMemberMember | ChatMemberAdministrator
+    if status == "administrator":
+        new_member = ChatMemberAdministrator(
+            user=User(id=user_id, is_bot=False, first_name=name),
+            status="administrator",
+            can_be_edited=False,
+            is_anonymous=False,
+            can_manage_chat=True,
+            can_delete_messages=True,
+            can_manage_video_chats=False,
+            can_restrict_members=True,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=False,
+            can_post_stories=False,
+            can_edit_stories=False,
+            can_delete_stories=False,
+            can_send_welcome_messages=False,
+        )
+    else:
+        new_member = ChatMemberMember(
+            user=User(id=user_id, is_bot=False, first_name=name), status=status
+        )
+    return Update(
+        update_id=0,
+        chat_member=ChatMemberUpdated(
+            chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+            from_user=User(id=user_id, is_bot=False, first_name=name),
+            date=datetime.now(UTC),
+            old_chat_member=old,
+            new_chat_member=new_member,
         ),
     )
 
