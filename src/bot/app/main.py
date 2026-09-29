@@ -108,11 +108,14 @@ def build_dispatcher(
     max_queue_age_s: int = 300,
 ) -> Dispatcher:
     navigator = MenuNavigator(core=i18n.core)
+    classifier_ = classifier if classifier is not None else build_classifier()
     linking = LinkingService(
         session_maker=session_maker,
         clock=clock,
         core=i18n.core,
         prompt_delete_after_s=prompt_delete_after_s,
+        # §5: a chat linked before Laya ever answered /health starts on Jev.
+        laya_deployed=lambda: classifier_.laya_deployed,
     )
     admin_cache = AdminCache(clock=clock, ttl_s=admin_cache_ttl_s)
     fanout = AlertFanout(core=i18n.core, clock=clock, pace_s=alerts_pace_s)

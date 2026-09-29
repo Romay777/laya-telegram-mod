@@ -55,11 +55,13 @@ class ChatRepository:
         linker_id: int,
         linked_at: datetime,
         chat_language: str,
+        backend: str = "laya",
     ) -> Chat:
         """Insert the Linked Chat with the §12 defaults, or return the stored one.
 
         Column defaults carry mode, sensitivity, ladder and expiry; the caller
-        passes what Linking knows: the chat itself and the Linker. Every
+        passes what Linking knows: the chat itself and the Linker. The backend
+        defaults to Laya but is Jev when Laya is not deployed (§5). Every
         Category in the table starts enabled (§12: custom Categories are
         reserved for later, so today that is all of them).
         """
@@ -73,6 +75,7 @@ class ChatRepository:
             linker_id=linker_id,
             linked_at=linked_at,
             chat_language=chat_language,
+            backend=backend,
         )
         self.session.add(chat)
         await self.session.flush()

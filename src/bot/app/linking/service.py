@@ -15,6 +15,7 @@ One entry point per way the flow moves:
 import asyncio
 import contextlib
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 
@@ -40,6 +41,7 @@ from app.db.repositories.chats import ChatRepository
 from app.db.repositories.link_intents import LinkIntentRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.db.repositories.users import BotUserRepository
+from app.domain.backends import linking_default
 from app.domain.linking import LinkingProblems, linking_problems, parse_chat_ref
 from app.i18n import guess_locale, translator_for
 from app.linking.deep_link import INTENT_TTL, startgroup_url
@@ -97,11 +99,13 @@ class LinkingService:
         clock: Clock,
         core: BaseCore,
         prompt_delete_after_s: float = 600.0,
+        laya_deployed: Callable[[], bool] | None = None,
     ) -> None:
         self._clock = clock
         self._core = core
         self._storage = PostgresStorage(session_maker)
         self._prompt_delete_after_s = prompt_delete_after_s
+        self._laya_deployed = laya_deployed or (lambda: True)
         self._deletion_tasks: set[asyncio.Task[None]] = set()
 
     async def start_link(self, *, bot: Bot, session: AsyncSession, user: BotUser) -> str:
@@ -405,6 +409,7 @@ class LinkingService:
             linker_id=facts.linker_id,
             linked_at=self._clock.now(),
             chat_language=chat_language,
+            backend=linking_default(laya_deployed=self._laya_deployed()),
         )
         await AdminSubscriptionRepository(session).set_mode(
             chat.chat_id, user_id=facts.linker_id, alert_mode="all"

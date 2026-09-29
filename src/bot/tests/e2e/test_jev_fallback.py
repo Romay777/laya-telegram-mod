@@ -240,4 +240,6 @@ async def test_with_laya_unhealthy_the_jev_failure_skips_without_trying_laya(
     assert row.reason == "timed out"
     (alert,) = app.session.calls_of("SendMessage")
     assert alert.method.chat_id == admin_id
-    assert alert.method.text == "⚠️ Jev is unavailable: timed out. Using Laya"
+    # Laya is unhealthy here: nothing took over, so the alert names the
+    # outage alone, without the fallback trailer (§5).
+    assert alert.method.text == "⚠️ Jev is unavailable: timed out"

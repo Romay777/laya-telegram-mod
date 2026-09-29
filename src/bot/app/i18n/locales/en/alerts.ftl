@@ -28,5 +28,6 @@ alert-open-journal = Open journal
 summary-header = 📊 {$chat} — the last {$hours} hours
 summary-suspicions = Suspicions: {$count}
 summary-punished = Punished by you: {$count}
-alert-incident = ⚠️ {$backend} is unavailable: {$reason}. Using Laya
+alert-incident = ⚠️ {$backend} is unavailable: {$reason}
+alert-incident-with-laya = ⚠️ {$backend} is unavailable: {$reason}. Using Laya
 alert-incident-recovery = ✅ {$backend} is back

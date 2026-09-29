@@ -143,15 +143,22 @@ def render_incident_alert(
     backend: str,
     reason: str,
     recovering: bool,
+    using_laya: bool = True,
 ) -> str:
     """The backend incident alert (§5, §9): which backend, why, what now.
 
-    The opening failure names the fallback ("Using Laya"); the follow-up on
-    the first success says the backend is back. No quote, no buttons.
+    The opening failure names the fallback ("Using Laya") only while Laya
+    actually serves the check; with nothing serving it, the alert names the
+    outage alone. The follow-up on the first success says the backend is
+    back. No quote, no buttons.
     """
     if recovering:
         return t("alert-incident-recovery", backend=backend)
-    return t("alert-incident", backend=backend, reason=reason)
+    return t(
+        "alert-incident-with-laya" if using_laya else "alert-incident",
+        backend=backend,
+        reason=reason,
+    )
 
 
 def render_appeal_alert(

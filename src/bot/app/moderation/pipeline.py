@@ -30,7 +30,7 @@ from app.db.repositories.incidents import IncidentRepository
 from app.db.repositories.moderation import ModerationRepository
 from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.suspicions import SuspicionRepository
-from app.domain.backends import BACKEND_NAMES
+from app.domain.backends import BACKEND_NAMES, JEV
 from app.domain.decision import decide
 from app.linking.admin_cache import AdminCache
 from app.moderation import signals
@@ -132,9 +132,17 @@ class ModerationPipeline:
         check = await self._backend.check(chat.backend, signals.extract_state(text, entities))
         latency_ms = round((time.monotonic() - started) * 1000)
 
-        if check.failure is not None:
+        if check.failure is not None and check.failure.backend == JEV:
+            # §5 scopes incidents to the Jev backend; a Laya failure leaves
+            # the chat quiet — there is nothing to fall back to.
             await self._note_failure(
-                bot, session, admin_cache, chat=chat, failure=check.failure, now=now
+                bot,
+                session,
+                admin_cache,
+                chat=chat,
+                failure=check.failure,
+                now=now,
+                using_laya=isinstance(check.outcome, dict),
             )
 
         if isinstance(check.outcome, CheckSkip):
@@ -307,6 +315,7 @@ class ModerationPipeline:
         chat: Chat,
         failure: BackendFailure,
         now: datetime,
+        using_laya: bool,
     ) -> None:
         """The first failure opens the incident and alerts once (§5).
 
@@ -328,6 +337,7 @@ class ModerationPipeline:
             backend=BACKEND_NAMES[failure.backend],
             reason=failure.reason,
             incident_id=incident.id,
+            using_laya=using_laya,
         )
 
     async def _note_success(

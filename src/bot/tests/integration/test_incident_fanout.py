@@ -94,6 +94,7 @@ async def test_the_incident_alert_reaches_all_and_appeals_modes(
         backend="Jev",
         reason="authentication failed",
         incident_id=7,
+        using_laya=True,
     )
 
     # §9: incidents reach `all` and `appeals`; `off` gets nothing.
@@ -126,6 +127,7 @@ async def test_the_recovery_follow_up_goes_to_exactly_the_chats_that_were_told(
         backend="Jev",
         reason="rate limited",
         incident_id=8,
+        using_laya=True,
     )
     bot.session.calls.clear()
     bot.session.script(GetChatMember, member_owner(user(LINKER)))

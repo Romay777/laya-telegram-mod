@@ -367,9 +367,11 @@ class AlertFanout:
         backend: str,
         reason: str,
         incident_id: int,
+        using_laya: bool,
     ) -> None:
         """Send the incident alert to every Admin whose mode includes
-        incidents (§5, §9): "⚠️ Jev is unavailable: … . Using Laya".
+        incidents (§5, §9): "⚠️ Jev is unavailable: …", with the fallback
+        named only while Laya actually serves the check.
 
         No buttons; every copy is recorded under the subject `incident`, so
         the recovery follow-up reaches exactly the chats that were told.
@@ -386,7 +388,9 @@ class AlertFanout:
                 chat=chat,
                 admin_id=admin_id,
                 t=t,
-                text=render_incident_alert(t, backend=backend, reason=reason, recovering=False),
+                text=render_incident_alert(
+                    t, backend=backend, reason=reason, recovering=False, using_laya=using_laya
+                ),
                 entities=[],
                 markup=None,
                 subject_type="incident",

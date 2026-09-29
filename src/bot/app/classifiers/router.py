@@ -23,7 +23,7 @@ itself touches no database and sends nothing (§5).
 """
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
@@ -109,6 +109,19 @@ class BackendRouter:
     def model_of(self, backend: str) -> str:
         """The pinned model of one backend, as a `message_check` row records it (§12)."""
         return self._models[backend]
+
+    def probe_forever(self, interval_s: float) -> Coroutine[Any, Any, None]:
+        """The Laya /health prober loop, started beside the poller in `main` (§5).
+
+        Only the real `LayaHealth` probes; a health stand-in that never
+        probes (tests) simply has no loop to run.
+        """
+        if isinstance(self._health, LayaHealth):
+            return self._health.probe_forever(interval_s)
+
+        async def _noop() -> None: ...
+
+        return _noop()
 
     async def aclose(self) -> None:
         """Release the underlying HTTP clients (shutdown)."""
