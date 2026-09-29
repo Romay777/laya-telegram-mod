@@ -29,3 +29,5 @@ alert-open-journal = Открыть журнал
 summary-header = 📊 {$chat} — последние {$hours} часов
 summary-suspicions = Подозрений: {$count}
 summary-punished = Наказано вами: {$count}
+alert-incident = ⚠️ {$backend} недоступен: {$reason}. Используется Laya
+alert-incident-recovery = ✅ {$backend} снова работает

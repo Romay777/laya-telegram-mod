@@ -15,6 +15,7 @@ from app.notices.durations import duration_text
 __all__ = [
     "message_link",
     "render_appeal_alert",
+    "render_incident_alert",
     "render_suspicion_alert",
     "render_violation_alert",
     "utf16_len",
@@ -134,6 +135,23 @@ def render_suspicion_alert(
         "url": url,
     }
     return _quoted_alert(t, header, flagged_text, flagged_entities, header_entities=[link])
+
+
+def render_incident_alert(
+    t: GetText,
+    *,
+    backend: str,
+    reason: str,
+    recovering: bool,
+) -> str:
+    """The backend incident alert (§5, §9): which backend, why, what now.
+
+    The opening failure names the fallback ("Using Laya"); the follow-up on
+    the first success says the backend is back. No quote, no buttons.
+    """
+    if recovering:
+        return t("alert-incident-recovery", backend=backend)
+    return t("alert-incident", backend=backend, reason=reason)
 
 
 def render_appeal_alert(

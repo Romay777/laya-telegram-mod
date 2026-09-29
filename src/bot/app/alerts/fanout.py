@@ -31,12 +31,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.alerts.rendering import (
     message_link,
     render_appeal_alert,
+    render_incident_alert,
     render_suspicion_alert,
     render_violation_alert,
 )
 from app.clock import Clock
 from app.db.models import BotUser, Chat
 from app.db.repositories.alerts import AlertRepository
+from app.db.repositories.chats import ChatRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.db.repositories.users import BotUserRepository
 from app.i18n import GetText, translator_for
@@ -57,6 +59,9 @@ FALLBACK_LANGUAGE = "en"
 
 #: The alert modes that receive Appeals (§9): `all` and `appeals`.
 APPEAL_MODES = ("all", "appeals")
+
+#: The alert modes that receive backend incidents (§9): the same pair.
+INCIDENT_MODES = ("all", "appeals")
 
 #: §9 burst handling: the first five Violation alerts per chat per minute
 #: go out one by one; the rest of that minute shares one summary alert.
@@ -352,6 +357,81 @@ class AlertFanout:
                     entities=[MessageEntity.model_validate(entity) for entity in entities],
                 )
 
+    async def backend_incident_alert(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        backend: str,
+        reason: str,
+        incident_id: int,
+    ) -> None:
+        """Send the incident alert to every Admin whose mode includes
+        incidents (§5, §9): "⚠️ Jev is unavailable: … . Using Laya".
+
+        No buttons; every copy is recorded under the subject `incident`, so
+        the recovery follow-up reaches exactly the chats that were told.
+        """
+        subscribers = await AdminSubscriptionRepository(session).user_ids_with_modes(
+            chat.chat_id, modes=INCIDENT_MODES
+        )
+        async for admin_id, _user, t in self._recipients(
+            bot, session, admin_cache, chat, subscribers
+        ):
+            await self._send_alert(
+                bot,
+                session,
+                chat=chat,
+                admin_id=admin_id,
+                t=t,
+                text=render_incident_alert(t, backend=backend, reason=reason, recovering=False),
+                entities=[],
+                markup=None,
+                subject_type="incident",
+                subject_id=incident_id,
+            )
+
+    async def backend_recovery_alerts(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        incident_id: int,
+        backend: str,
+    ) -> None:
+        """The "✅ Jev is back" follow-up (§5): one per chat that was told.
+
+        The chats come from the incident's recorded alert copies, so an
+        incident nobody was alerted about closes silently.
+        """
+        copies = await AlertRepository(session).alerts_for("incident", incident_id)
+        told_chats = {copy.chat_id for copy in copies}
+        for chat_id in told_chats:
+            chat = await ChatRepository(session).get(chat_id)
+            if chat is None:
+                continue
+            subscribers = await AdminSubscriptionRepository(session).user_ids_with_modes(
+                chat.chat_id, modes=INCIDENT_MODES
+            )
+            async for admin_id, _user, t in self._recipients(
+                bot, session, admin_cache, chat, subscribers
+            ):
+                await self._send_alert(
+                    bot,
+                    session,
+                    chat=chat,
+                    admin_id=admin_id,
+                    t=t,
+                    text=render_incident_alert(t, backend=backend, reason="", recovering=True),
+                    entities=[],
+                    markup=None,
+                    subject_type="incident",
+                    subject_id=incident_id,
+                )
+
     async def _translator_of(self, session: AsyncSession, admin_id: int) -> GetText:
         """The translator of an Admin's interface language (§15)."""
         user = await BotUserRepository(session).get(admin_id)
@@ -463,7 +543,7 @@ class AlertFanout:
         t: GetText,
         text: str,
         entities: list[dict[str, Any]],
-        markup: InlineKeyboardMarkup,
+        markup: InlineKeyboardMarkup | None,
         subject_type: str,
         subject_id: int,
     ) -> None:
