@@ -283,9 +283,10 @@ class AdminAlert(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"))
     admin_id: Mapped[int] = mapped_column(BigInteger)
     message_id: Mapped[int] = mapped_column(BigInteger)
-    # violation | suspicion | appeal (§12).
+    # violation | suspicion | appeal | incident | burst | lifecycle (§12).
     subject_type: Mapped[str] = mapped_column(String(16))
-    subject_id: Mapped[int] = mapped_column()
+    # An entity id; the lifecycle subject is a chat id, so BigInteger (§12).
+    subject_id: Mapped[int] = mapped_column(BigInteger)
 
 
 class BackendIncident(Base):

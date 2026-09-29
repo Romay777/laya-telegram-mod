@@ -6,6 +6,8 @@ from aiogram.types import (
     CallbackQuery,
     Chat,
     ChatMemberAdministrator,
+    ChatMemberBanned,
+    ChatMemberLeft,
     ChatMemberMember,
     ChatMemberUpdated,
     Message,
@@ -338,22 +340,74 @@ def my_chat_member_update(
     can_restrict_members: bool = True,
 ) -> Update:
     """The bot's own status changing: Telegram promotes it to administrator."""
+    return bot_membership_update(
+        chat_id,
+        chat_type,
+        linker_id=linker_id,
+        language_code=language_code,
+        title=title,
+        new_status="administrator",
+        can_delete_messages=can_delete_messages,
+        can_restrict_members=can_restrict_members,
+    )
+
+
+def bot_membership_update(
+    chat_id: int,
+    chat_type: str,
+    *,
+    linker_id: int,
+    new_status: str,
+    language_code: str | None = "en",
+    title: str | None = None,
+    can_delete_messages: bool = True,
+    can_restrict_members: bool = True,
+) -> Update:
+    """Any `my_chat_member` update: the bot's standing in the chat changed (§10).
+
+    `new_status` is `administrator` (with the two rights as given), `member`
+    (demoted), `left` (removed) or `kicked` (banned). The old standing is a
+    full administrator, what a Linked Chat's bot had before the event.
+    """
+    if new_status == "administrator":
+        new_member = ChatMemberAdministrator(
+            user=BOT_USER,
+            status="administrator",
+            can_be_edited=False,
+            is_anonymous=False,
+            can_manage_chat=True,
+            can_delete_messages=can_delete_messages,
+            can_manage_video_chats=False,
+            can_restrict_members=can_restrict_members,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=False,
+            can_post_stories=False,
+            can_edit_stories=False,
+            can_delete_stories=False,
+            can_send_welcome_messages=False,
+        )
+    elif new_status == "member":
+        new_member = ChatMemberMember(user=BOT_USER, status="member")
+    elif new_status == "left":
+        new_member = ChatMemberLeft(user=BOT_USER, status="left")
+    else:  # kicked
+        new_member = ChatMemberBanned(user=BOT_USER, status="kicked", until_date=0)
     return Update(
         update_id=0,
         my_chat_member=ChatMemberUpdated(
             chat=Chat(id=chat_id, type=chat_type, title=title),
             from_user=_user(linker_id, language_code),
             date=datetime.now(UTC),
-            old_chat_member=ChatMemberMember(user=BOT_USER, status="member"),
-            new_chat_member=ChatMemberAdministrator(
+            old_chat_member=ChatMemberAdministrator(
                 user=BOT_USER,
                 status="administrator",
                 can_be_edited=False,
                 is_anonymous=False,
                 can_manage_chat=True,
-                can_delete_messages=can_delete_messages,
+                can_delete_messages=True,
                 can_manage_video_chats=False,
-                can_restrict_members=can_restrict_members,
+                can_restrict_members=True,
                 can_promote_members=False,
                 can_change_info=False,
                 can_invite_users=False,
@@ -362,5 +416,6 @@ def my_chat_member_update(
                 can_delete_stories=False,
                 can_send_welcome_messages=False,
             ),
+            new_chat_member=new_member,
         ),
     )

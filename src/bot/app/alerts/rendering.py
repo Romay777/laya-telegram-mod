@@ -17,6 +17,7 @@ __all__ = [
     "render_appeal_alert",
     "render_channel_alert",
     "render_incident_alert",
+    "render_lifecycle_alert",
     "render_suspicion_alert",
     "render_violation_alert",
     "utf16_len",
@@ -221,3 +222,43 @@ def render_appeal_alert(
         ]
     )
     return _quoted_alert(t, header, flagged_text, flagged_entities)
+
+
+def render_lifecycle_alert(
+    t: GetText,
+    *,
+    chat_title: str,
+    kind: str,
+    missing_rights: tuple[str, ...],
+    removed_chat_days: int,
+) -> str:
+    """The Suspended / Removed / re-activated alert of §9's table row.
+
+    `kind` is `suspended` (the missing rights are listed), `removed` (the
+    retention window is named), or `reactivated` (the all-clear). Plain
+    lines, no quote — there is no message to show.
+    """
+    if kind == "suspended":
+        return "\n".join(
+            [
+                t("alert-suspended-header", chat=chat_title),
+                t(
+                    "alert-suspended-missing",
+                    rights=", ".join(t(f"menu-right-{right}") for right in missing_rights),
+                ),
+                t("alert-suspended-check"),
+            ]
+        )
+    if kind == "removed":
+        return "\n".join(
+            [
+                t("alert-removed-header", chat=chat_title),
+                t("alert-removed-kept", days=removed_chat_days),
+            ]
+        )
+    return "\n".join(
+        [
+            t("alert-reactivated-header", chat=chat_title),
+            t("alert-reactivated-checks"),
+        ]
+    )

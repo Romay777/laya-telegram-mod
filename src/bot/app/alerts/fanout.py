@@ -33,6 +33,7 @@ from app.alerts.rendering import (
     render_appeal_alert,
     render_channel_alert,
     render_incident_alert,
+    render_lifecycle_alert,
     render_suspicion_alert,
     render_violation_alert,
 )
@@ -48,10 +49,11 @@ from app.menu.callbacks import (
     AppealDecideCallback,
     JournalCallback,
     LiftRestrictionCallback,
+    LinkCheckCallback,
     SuspicionDecideCallback,
     UnbanChannelCallback,
 )
-from app.menu.screens.buttons import DANGER, SUCCESS
+from app.menu.screens.buttons import DANGER, PRIMARY, SUCCESS
 
 #: The private-chat limit: about one message per second per Admin (§9).
 PACE_S = 1.0
@@ -64,6 +66,9 @@ APPEAL_MODES = ("all", "appeals")
 
 #: The alert modes that receive backend incidents (§9): the same pair.
 INCIDENT_MODES = ("all", "appeals")
+
+#: The alert modes that receive Suspension and removal (§9): the same pair.
+LIFECYCLE_MODES = ("all", "appeals")
 
 #: §9 burst handling: the first five Violation alerts per chat per minute
 #: go out one by one; the rest of that minute shares one summary alert.
@@ -171,6 +176,25 @@ def unban_keyboard(t: GetText, chat_id: int, violation_id: int) -> InlineKeyboar
                         chat_id=chat_id, violation_id=violation_id
                     ).pack(),
                     style=SUCCESS,
+                )
+            ]
+        ]
+    )
+
+
+def check_again_keyboard(t: GetText, chat_id: int) -> InlineKeyboardMarkup:
+    """The 🔵 Check again button of a Suspension alert (§9, §10).
+
+    The Linking Check-again callback doubles here: its re-check reads the
+    chat's status and reactivates a Suspended Chat whose rights are back.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("alert-check-again-button"),
+                    callback_data=LinkCheckCallback(chat_id=chat_id).pack(),
+                    style=PRIMARY,
                 )
             ]
         ]
@@ -502,6 +526,140 @@ class AlertFanout:
                 markup=unban_keyboard(t, chat.chat_id, violation_id),
                 subject_type="violation",
                 subject_id=violation_id,
+            )
+
+    async def suspension_alert(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        missing_rights: tuple[str, ...],
+        removed_chat_days: int,
+    ) -> None:
+        """The chat was Suspended: what is missing, with 🔵 Check again (§9, §10).
+
+        Every Admin whose mode includes Suspension gets a copy, recorded
+        under the subject `lifecycle`; a re-activation edits every copy.
+        """
+        subscribers = await AdminSubscriptionRepository(session).user_ids_with_modes(
+            chat.chat_id, modes=LIFECYCLE_MODES
+        )
+        async for admin_id, _user, t in self._recipients(
+            bot, session, admin_cache, chat, subscribers
+        ):
+            await self._send_alert(
+                bot,
+                session,
+                chat=chat,
+                admin_id=admin_id,
+                t=t,
+                text=render_lifecycle_alert(
+                    t,
+                    chat_title=chat.title or str(chat.chat_id),
+                    kind="suspended",
+                    missing_rights=missing_rights,
+                    removed_chat_days=removed_chat_days,
+                ),
+                entities=[],
+                markup=check_again_keyboard(t, chat.chat_id),
+                subject_type="lifecycle",
+                subject_id=chat.chat_id,
+            )
+
+    async def removal_alert(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        removed_chat_days: int,
+    ) -> None:
+        """The bot was removed: the settings are kept for the window (§9, §10)."""
+        subscribers = await AdminSubscriptionRepository(session).user_ids_with_modes(
+            chat.chat_id, modes=LIFECYCLE_MODES
+        )
+        async for admin_id, _user, t in self._recipients(
+            bot, session, admin_cache, chat, subscribers
+        ):
+            await self._send_alert(
+                bot,
+                session,
+                chat=chat,
+                admin_id=admin_id,
+                t=t,
+                text=render_lifecycle_alert(
+                    t,
+                    chat_title=chat.title or str(chat.chat_id),
+                    kind="removed",
+                    missing_rights=(),
+                    removed_chat_days=removed_chat_days,
+                ),
+                entities=[],
+                markup=None,
+                subject_type="lifecycle",
+                subject_id=chat.chat_id,
+            )
+
+    async def reactivation_alerts(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        removed_chat_days: int,
+    ) -> None:
+        """The chat is active again: every Suspension copy shows the all-clear (§10).
+
+        The copies were recorded under the subject `lifecycle`; the news
+        goes to whoever holds one, and to any subscribed Admin who was
+        never told (§10: the Linker is notified).
+        """
+        copies = await AlertRepository(session).alerts_for("lifecycle", chat.chat_id)
+        for copy in copies:
+            t = await self._translator_of(session, copy.admin_id)
+            with contextlib.suppress(TelegramBadRequest):
+                await bot.edit_message_text(
+                    chat_id=copy.admin_id,
+                    message_id=copy.message_id,
+                    text=render_lifecycle_alert(
+                        t,
+                        chat_title=chat.title or str(chat.chat_id),
+                        kind="reactivated",
+                        missing_rights=(),
+                        removed_chat_days=removed_chat_days,
+                    ),
+                    reply_markup=None,
+                )
+        told = {copy.admin_id for copy in copies}
+        subscribers = await AdminSubscriptionRepository(session).user_ids_with_modes(
+            chat.chat_id, modes=LIFECYCLE_MODES
+        )
+        async for admin_id, _user, t in self._recipients(
+            bot, session, admin_cache, chat, subscribers
+        ):
+            if admin_id in told:
+                continue  # their copy was just edited; no second message
+            await self._send_alert(
+                bot,
+                session,
+                chat=chat,
+                admin_id=admin_id,
+                t=t,
+                text=render_lifecycle_alert(
+                    t,
+                    chat_title=chat.title or str(chat.chat_id),
+                    kind="reactivated",
+                    missing_rights=(),
+                    removed_chat_days=removed_chat_days,
+                ),
+                entities=[],
+                markup=None,
+                subject_type="lifecycle",
+                subject_id=chat.chat_id,
             )
 
     async def _translator_of(self, session: AsyncSession, admin_id: int) -> GetText:

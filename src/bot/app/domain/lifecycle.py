@@ -40,10 +40,20 @@ def _rights_of(member_status: str, can_delete: bool, can_restrict: bool) -> tupl
     return tuple(right for right in REQUIRED_RIGHTS if not held[right])
 
 
+def rights_missing(
+    *, status: str, can_delete_messages: bool, can_restrict_members: bool
+) -> tuple[str, ...]:
+    """The required rights one bot membership lacks, in listing order (§10).
+
+    A bot that is no longer an administrator lacks both, whatever the
+    flags on the membership object say.
+    """
+    return _rights_of(status, can_delete_messages, can_restrict_members)
+
+
 def lifecycle_outcome(
     *,
     was_active: bool,
-    old_status: str,
     new_status: str,
     can_delete_messages: bool,
     can_restrict_members: bool,

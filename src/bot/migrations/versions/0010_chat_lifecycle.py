@@ -8,7 +8,9 @@ Deleting a Removed Chat (§11) drops every chat-scoped row by cascade
 (ADR-0001). `violation.check_id` still pointed at `message_check.id`
 without one, so a purge that cascaded the checks would fail on it; the
 constraint is rebuilt with `ondelete="CASCADE"`. A partial index over
-`chat.removed_at` gives the scheduler's due-purge query its §12 index.
+`chat.removed_at` gives the scheduler's due-purge query its §12 index,
+and `admin_alert.subject_id` widens to BigInteger — the lifecycle alert
+is recorded under the chat id itself (§9, §10).
 """
 
 from collections.abc import Sequence
@@ -33,6 +35,9 @@ def upgrade() -> None:
         ["id"],
         ondelete="CASCADE",
     )
+    op.alter_column(
+        "admin_alert", "subject_id", existing_type=sa.Integer(), type_=sa.BigInteger()
+    )
     op.create_index(
         "ix_chat_removed_at",
         "chat",
@@ -43,6 +48,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_chat_removed_at", table_name="chat")
+    op.alter_column(
+        "admin_alert", "subject_id", existing_type=sa.BigInteger(), type_=sa.Integer()
+    )
     op.drop_constraint("violation_check_id_fkey", "violation", type_="foreignkey")
     op.create_foreign_key(
         "violation_check_id_fkey", "violation", "message_check", ["check_id"], ["id"]

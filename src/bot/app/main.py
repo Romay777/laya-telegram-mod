@@ -20,6 +20,7 @@ from app.db.fsm_storage import PostgresStorage
 from app.db.migrate import run_migrations
 from app.domain.backends import JEV, LAYA, jev_available
 from app.i18n.middleware import build_i18n_middleware
+from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
 from app.linking.service import LinkingService
 from app.menu.navigator import MenuNavigator
@@ -102,6 +103,7 @@ def build_dispatcher(
     outcome_visible_s: int = 600,
     alerts_pace_s: float = 1.0,
     summary_after_h: int = 48,
+    removed_chat_days: int = 30,
     notices: NoticeQueue | None = None,
     notices_per_second: float = 1,
     notices_per_minute: int = 18,
@@ -120,6 +122,12 @@ def build_dispatcher(
     )
     admin_cache = AdminCache(clock=clock, ttl_s=admin_cache_ttl_s)
     fanout = AlertFanout(core=i18n.core, clock=clock, pace_s=alerts_pace_s)
+    lifecycle = ChatLifecycleService(
+        clock=clock,
+        fanout=fanout,
+        admin_cache=admin_cache,
+        removed_chat_days=removed_chat_days,
+    )
     notice_queue = (
         notices
         if notices is not None
@@ -158,6 +166,7 @@ def build_dispatcher(
     dispatcher["linking"] = linking
     dispatcher["admin_cache"] = admin_cache
     dispatcher["fanout"] = fanout
+    dispatcher["lifecycle"] = lifecycle
     dispatcher["notices"] = notice_queue
     dispatcher["session_maker"] = session_maker
     dispatcher["pipeline"] = pipeline
@@ -199,6 +208,7 @@ async def run() -> None:
         outcome_visible_s=settings.notices.outcome_visible_s,
         alerts_pace_s=settings.alerts.pace_s,
         summary_after_h=settings.observation.summary_after_h,
+        removed_chat_days=settings.retention.removed_chat_days,
         notices_per_second=settings.notices.per_second,
         notices_per_minute=settings.notices.per_minute,
         max_queue_age_s=settings.notices.max_queue_age_s,
