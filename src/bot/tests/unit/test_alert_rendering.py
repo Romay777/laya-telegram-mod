@@ -226,3 +226,29 @@ async def test_a_purged_suspicion_says_so_but_keeps_the_link() -> None:
             "url": url,
         }
     ]
+
+
+async def test_the_channel_alert_names_the_chat_the_channel_and_the_verdict() -> None:
+    """The foreign-channel alert (§4): no Member, no Step, the quote instead."""
+    from app.alerts.rendering import render_channel_alert
+
+    core = await started_core()
+    t = translator_for(core, "en")
+
+    text, entities = render_channel_alert(
+        t,
+        chat_title="My Chat",
+        channel_title="Spam Channel",
+        category="ads",
+        confidence=0.93,
+        flagged_text="Buy everything",
+        flagged_entities=[],
+    )
+
+    assert "My Chat" in text
+    assert "Spam Channel" in text
+    assert "Advertising" in text
+    assert "Buy everything" in text
+    quote = [e for e in entities if e["type"] == "blockquote"]
+    assert quote != []  # the message is quoted with a blockquote (§9)
+    assert t("alert-unban-button") == "🟢 Unban"  # the button text exists (§4)
