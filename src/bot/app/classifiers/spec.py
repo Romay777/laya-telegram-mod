@@ -22,6 +22,16 @@ LAYA_MODEL: Final = "multilingual"
 #: not an Operator setting (§3, ADR-0002).
 LAYA_BASE_URL: Final = "http://laya:8000/v1"
 
+#: The default Jev endpoint (§3): TypeSafe. An Operator pointing at OpenRouter
+#: sets JEV_BASE_URL=https://openrouter.ai/api/v1; the client appends
+#: `/systemone` to whatever base it is given.
+JEV_BASE_URL_DEFAULT: Final = "https://api.typesafe.ai/v1"
+
+#: The pinned Jev model of the §3 example .env; the Operator pins theirs with
+#: JEV_MODEL — never `jev-latest`, because thresholds are tuned per version
+#: (ADR-0002).
+JEV_MODEL_DEFAULT: Final = "jev-1.13.0"
+
 QUESTION_SPEC: Final = {
     "category": {
         "type": "choice",

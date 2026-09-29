@@ -10,9 +10,15 @@ import json
 import httpx
 import pytest
 from app.classifiers.client import SystemOneClient, SystemOneError, SystemOneTimeoutError
-from app.classifiers.spec import LAYA_MODEL, QUESTION_SPEC
+from app.classifiers.spec import JEV_MODEL_DEFAULT, LAYA_MODEL, QUESTION_SPEC
 
-from .system_one_fixtures import CLEAN_ANSWER, SPAM_ANSWER, assert_all_labels, without_label
+from .system_one_fixtures import (
+    CLEAN_ANSWER,
+    SPAM_ANSWER,
+    assert_all_labels,
+    with_extra_top_level_fields,
+    without_label,
+)
 
 STATE = {"message": "Buy cheap crypto now, DM me", "urls": ["https://t.me/+abc"]}
 
@@ -117,3 +123,116 @@ async def test_the_call_carries_the_configured_timeout() -> None:
     await client.aclose()
 
     assert seen["timeout"] == {"connect": 1.5, "read": 1.5, "write": 1.5, "pool": 1.5}
+
+
+# --- Jev (ticket #14): the same client against the TypeSafe / OpenRouter shape.
+
+
+def make_jev_client(handler, base_url: str = "https://api.typesafe.ai/v1") -> SystemOneClient:
+    return SystemOneClient(
+        base_url,
+        model=JEV_MODEL_DEFAULT,
+        api_key="jev-secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+
+async def test_a_jev_request_appends_systemone_to_the_typesafe_base_url() -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json=CLEAN_ANSWER)
+
+    client = make_jev_client(handler)
+    await client.classify(STATE, QUESTION_SPEC)
+    await client.aclose()
+
+    assert seen["url"] == "https://api.typesafe.ai/v1/systemone"
+
+
+async def test_an_openrouter_base_url_is_used_verbatim() -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json=CLEAN_ANSWER)
+
+    client = make_jev_client(handler, base_url="https://openrouter.ai/api/v1")
+    await client.classify(STATE, QUESTION_SPEC)
+    await client.aclose()
+
+    assert seen["url"] == "https://openrouter.ai/api/v1/systemone"
+
+
+async def test_a_jev_request_pins_its_model_and_sends_the_bearer_key() -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.read())
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json=CLEAN_ANSWER)
+
+    client = make_jev_client(handler)
+    await client.classify(STATE, QUESTION_SPEC)
+    await client.aclose()
+
+    assert seen["body"]["model"] == JEV_MODEL_DEFAULT  # pinned, never `jev-latest` (ADR-0002)
+    assert seen["body"]["state"] == STATE
+    assert seen["body"]["questions"] == QUESTION_SPEC
+    assert seen["auth"] == "Bearer jev-secret"
+
+
+async def test_a_jev_answer_with_extra_top_level_fields_is_extracted() -> None:
+    """TypeSafe / OpenRouter wrap their own metadata around `answers` (§17)."""
+    client = make_jev_client(
+        lambda request: httpx.Response(200, json=with_extra_top_level_fields(SPAM_ANSWER))
+    )
+    probabilities = await client.classify(STATE, QUESTION_SPEC)
+    await client.aclose()
+
+    assert_all_labels(probabilities)
+    assert probabilities["spam"] == pytest.approx(0.97)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_an_auth_failure_names_authentication_as_the_reason(status: int) -> None:
+    client = make_jev_client(lambda request: httpx.Response(status, json={"error": "denied"}))
+
+    with pytest.raises(SystemOneError) as raised:
+        await client.classify(STATE, QUESTION_SPEC)
+    await client.aclose()
+
+    assert raised.value.reason == "authentication failed"
+
+
+async def test_a_rate_limit_names_the_limit_as_the_reason() -> None:
+    client = make_jev_client(lambda request: httpx.Response(429, json={"error": "slow down"}))
+
+    with pytest.raises(SystemOneError) as raised:
+        await client.classify(STATE, QUESTION_SPEC)
+    await client.aclose()
+
+    assert raised.value.reason == "rate limited"
+
+
+async def test_a_server_error_names_the_status_as_the_reason() -> None:
+    client = make_jev_client(lambda request: httpx.Response(503, json={"error": "down"}))
+
+    with pytest.raises(SystemOneError) as raised:
+        await client.classify(STATE, QUESTION_SPEC)
+    await client.aclose()
+
+    assert raised.value.reason == "backend answered 503"
+
+
+async def test_a_timeout_names_the_timeout_as_the_reason() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("timed out")
+
+    client = make_jev_client(handler)
+    with pytest.raises(SystemOneTimeoutError) as raised:
+        await client.classify(STATE, QUESTION_SPEC)
+    await client.aclose()
+
+    assert raised.value.reason == "timed out"

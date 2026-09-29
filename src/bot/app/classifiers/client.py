@@ -17,11 +17,24 @@ Probabilities = dict[str, float]
 
 
 class SystemOneError(Exception):
-    """A backend failure: transport, HTTP status, or a malformed answer."""
+    """A backend failure: transport, HTTP status, or a malformed answer.
+
+    `reason` is the short human phrase an incident Admin Alert quotes (§5):
+    "authentication failed", "rate limited", "backend answered 503", or the
+    transport detail.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        super().__init__(message)
+        #: The §5 incident reason; defaults to the message itself.
+        self.reason = reason if reason is not None else message
 
 
 class SystemOneTimeoutError(SystemOneError):
     """The backend did not answer within `timeout_s`."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, reason="timed out")
 
 
 class SystemOneClient:
@@ -53,8 +66,15 @@ class SystemOneClient:
 
         try:
             response.raise_for_status()
-        except httpx.HTTPStatusError as error:
-            raise SystemOneError(f"backend answered {response.status_code}") from error
+        except httpx.HTTPStatusError:
+            status = response.status_code
+            if status in (401, 403):
+                raise SystemOneError(
+                    f"backend answered {status}", reason="authentication failed"
+                ) from None
+            if status == 429:
+                raise SystemOneError(f"backend answered {status}", reason="rate limited") from None
+            raise SystemOneError(f"backend answered {status}") from None
 
         return self._extract(response)
 

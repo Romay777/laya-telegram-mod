@@ -3,6 +3,8 @@
 The bodies are recorded from the Laya server contract
 (`src/laya-server/tests/test_http_contract.py`): a `choice` answer carries
 `answers.<question>.probabilities` with every label of the question spec.
+The Jev answers are recorded from the TypeSafe / OpenRouter shape: the same
+`answers` block, with the provider's own top-level metadata around it.
 """
 
 from app.classifiers.spec import LABELS
@@ -32,6 +34,24 @@ SPAM_ANSWER = {
     },
     "usage": {"input_tokens": 24, "output_tokens": 0},
 }
+
+
+def with_extra_top_level_fields(answer: dict) -> dict:
+    """A Jev answer carrying fields beyond the protocol (§5): id, created, usage extras.
+
+    TypeSafe and OpenRouter both wrap their own metadata around the System
+    One answer; the client reads only `answers` and ignores the rest.
+    """
+    enriched = dict(answer)
+    enriched.update(
+        {
+            "id": "chatcmpl-jev-0001",
+            "created": 1767139200,
+            "provider": "typesafe",
+            "usage": {"input_tokens": 16, "output_tokens": 0, "total_tokens": 16},
+        }
+    )
+    return enriched
 
 
 def without_label(answer: dict, label: str) -> dict:
