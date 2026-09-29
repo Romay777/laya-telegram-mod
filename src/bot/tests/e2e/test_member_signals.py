@@ -29,8 +29,6 @@ _chat_ids = count(-100850, -10)
 NEAR_MISS = {"spam": 0.80, "ads": 0.05, "insult": 0.05, "clean": 0.10}
 INVITE_TEXT = "Join our channel https://t.me/+abc123 now"
 
-pytestmark = pytest.mark.usefixtures()
-
 
 @pytest.fixture
 def admin_id() -> Iterator[int]:
