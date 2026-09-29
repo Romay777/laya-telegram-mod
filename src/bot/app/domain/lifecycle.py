@@ -31,15 +31,6 @@ class LifecycleOutcome:
         return self.action is not LifecycleAction.NONE
 
 
-def _rights_of(member_status: str, can_delete: bool, can_restrict: bool) -> tuple[str, ...]:
-    """The required rights the membership lacks, in listing order."""
-    if member_status != "administrator":
-        # Demoted to member, kicked, or left: every required right is gone.
-        return REQUIRED_RIGHTS
-    held = {"can_delete_messages": can_delete, "can_restrict_members": can_restrict}
-    return tuple(right for right in REQUIRED_RIGHTS if not held[right])
-
-
 def rights_missing(
     *, status: str, can_delete_messages: bool, can_restrict_members: bool
 ) -> tuple[str, ...]:
@@ -48,7 +39,13 @@ def rights_missing(
     A bot that is no longer an administrator lacks both, whatever the
     flags on the membership object say.
     """
-    return _rights_of(status, can_delete_messages, can_restrict_members)
+    if status != "administrator":
+        return REQUIRED_RIGHTS
+    held = {
+        "can_delete_messages": can_delete_messages,
+        "can_restrict_members": can_restrict_members,
+    }
+    return tuple(right for right in REQUIRED_RIGHTS if not held[right])
 
 
 def lifecycle_outcome(
@@ -69,7 +66,11 @@ def lifecycle_outcome(
     if new_status in ("left", "kicked"):
         return LifecycleOutcome(action=LifecycleAction.REMOVE)
 
-    missing = _rights_of(new_status, can_delete_messages, can_restrict_members)
+    missing = rights_missing(
+        status=new_status,
+        can_delete_messages=can_delete_messages,
+        can_restrict_members=can_restrict_members,
+    )
     if missing:
         if was_active:
             return LifecycleOutcome(action=LifecycleAction.SUSPEND, missing_rights=missing)
@@ -79,8 +80,3 @@ def lifecycle_outcome(
     if was_active:
         return LifecycleOutcome()
     return LifecycleOutcome(action=LifecycleAction.REACTIVATE)
-
-
-def removed_after(*, removed_at, now, retention_days: int) -> bool:
-    """Whether a Removed Chat's 30-day retention has run out (§10, §11)."""
-    return (now - removed_at).total_seconds() >= retention_days * 86400

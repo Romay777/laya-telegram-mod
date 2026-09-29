@@ -4,9 +4,7 @@ One `my_chat_member` event in, one `LifecycleOutcome` out — the tests read
 like the §10 transition table.
 """
 
-from datetime import UTC, datetime, timedelta
-
-from app.domain.lifecycle import LifecycleAction, lifecycle_outcome, removed_after
+from app.domain.lifecycle import LifecycleAction, lifecycle_outcome
 
 
 def test_active_chat_losing_a_required_right_suspends_and_names_it() -> None:
@@ -89,14 +87,3 @@ def test_an_active_chat_holding_its_rights_is_no_news() -> None:
     )
 
     assert not outcome
-
-
-def test_removed_after_30_days() -> None:
-    removed_at = datetime(2026, 1, 1, tzinfo=UTC)
-    assert not removed_after(removed_at=removed_at, now=removed_at, retention_days=30)
-    assert not removed_after(
-        removed_at=removed_at, now=removed_at + timedelta(days=29), retention_days=30
-    )
-    assert removed_after(
-        removed_at=removed_at, now=removed_at + timedelta(days=30), retention_days=30
-    )

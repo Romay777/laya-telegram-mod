@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery, ChatMemberUpdated
 from aiogram_i18n import I18nContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BotUser
+from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.lifecycle.service import ChatLifecycleService
 from app.linking.service import LinkingService
@@ -112,7 +112,7 @@ async def recheck_suspended(
     lifecycle: ChatLifecycleService,
     navigator: MenuNavigator,
     bot_user: BotUser,
-    chat: BotUser | None,
+    chat: Chat,
     i18n: I18nContext,
 ) -> None:
     """🔵 Check again on a Suspended Chat: re-read the rights live (§10).
