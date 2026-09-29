@@ -239,3 +239,117 @@ async def test_set_chat_language_stores_the_chat_language(db_session: AsyncSessi
 
     chat = await repo.get(chat_id)
     assert chat is not None and chat.chat_language == "ru"
+
+
+# --- The chat lifecycle (§10): Suspended, Removed, and the way back ----------
+
+
+async def linked_chat(db_session: AsyncSession) -> tuple[ChatRepository, int]:
+    chat_id = next(_chat_ids)
+    await ChatRepository(db_session).create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=77,
+        linked_at=FakeClock().now(),
+        chat_language="en",
+    )
+    return ChatRepository(db_session), chat_id
+
+
+async def test_mark_suspended_and_mark_active_set_the_status(db_session: AsyncSession) -> None:
+    repo, chat_id = await linked_chat(db_session)
+
+    await repo.mark_suspended(chat_id)
+    assert (await repo.get(chat_id)).status == "suspended"
+
+    await repo.mark_active(chat_id)
+    chat = await repo.get(chat_id)
+    assert chat.status == "active"
+    assert chat.removed_at is None
+
+
+async def test_mark_removed_records_when_the_bot_left(db_session: AsyncSession) -> None:
+    repo, chat_id = await linked_chat(db_session)
+    now = FakeClock().now()
+
+    await repo.mark_removed(chat_id, removed_at=now)
+
+    chat = await repo.get(chat_id)
+    assert chat.status == "removed"
+    assert chat.removed_at == now
+
+
+async def test_due_removed_chats_lists_only_past_the_retention(db_session: AsyncSession) -> None:
+    repo, chat_id = await linked_chat(db_session)
+    removed_at = FakeClock().now()
+    await repo.mark_removed(chat_id, removed_at=removed_at)
+    later = ChatRepository(db_session)
+    fresh_id = next(_chat_ids)
+    await later.create_linked(
+        chat_id=fresh_id,
+        title="Fresh",
+        linker_id=77,
+        linked_at=removed_at,
+        chat_language="en",
+    )
+    await later.mark_removed(fresh_id, removed_at=removed_at)
+
+    due_at_29_days = await repo.due_removed_chats(
+        removed_at + timedelta(days=29), removed_chat_days=30
+    )
+    assert due_at_29_days == []
+
+    due_at_30_days = await repo.due_removed_chats(
+        removed_at + timedelta(days=30), removed_chat_days=30
+    )
+    assert sorted(chat.chat_id for chat in due_at_30_days) == sorted([chat_id, fresh_id])
+
+
+async def test_purge_deletes_the_chat_row(db_session: AsyncSession) -> None:
+    repo, chat_id = await linked_chat(db_session)
+
+    await repo.purge(chat_id)
+
+    assert await repo.get(chat_id) is None
+
+
+async def test_relinking_a_removed_chat_within_the_window_restores_it(
+    db_session: AsyncSession,
+) -> None:
+    """The row is kept for 30 days, so a re-add brings the settings back (§10)."""
+    repo, chat_id = await linked_chat(db_session)
+    stored = await repo.get(chat_id)
+    stored.mode = "auto"
+    stored.sensitivity = "strict"
+    removed_at = FakeClock().now()
+    await repo.mark_removed(chat_id, removed_at=removed_at)
+    repo.session.expire_all()  # read back from the DB, not the session cache
+
+    restored = await repo.create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=88,
+        linked_at=removed_at + timedelta(days=5),
+        chat_language="en",
+    )
+
+    assert restored.status == "active"
+    assert restored.mode == "auto"  # the previous settings survive
+    assert restored.sensitivity == "strict"
+    assert restored.removed_at is None
+    assert restored.linker_id == 88  # the new Linker takes over
+
+
+async def test_create_linked_keeps_an_active_chat_as_is(db_session: AsyncSession) -> None:
+    repo, chat_id = await linked_chat(db_session)
+
+    again = await repo.create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=77,
+        linked_at=FakeClock().now(),
+        chat_language="en",
+    )
+
+    assert again.status == "active"
+    assert again.removed_at is None

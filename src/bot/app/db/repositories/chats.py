@@ -1,6 +1,6 @@
 """Repository for `chat` rows (§12): Linked Chats and their defaults."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,14 +59,22 @@ class ChatRepository:
     ) -> Chat:
         """Insert the Linked Chat with the §12 defaults, or return the stored one.
 
-        Column defaults carry mode, sensitivity, ladder and expiry; the caller
-        passes what Linking knows: the chat itself and the Linker. The backend
-        defaults to Laya but is Jev when Laya is not deployed (§5). Every
-        Category in the table starts enabled (§12: custom Categories are
-        reserved for later, so today that is all of them).
+        A `removed` row found here is a re-add inside the retention window
+        (§10): the same row returns to `active` with its previous settings —
+        mode, ladder, Categories, subscription — intact, under the new
+        Linker. Column defaults carry mode, sensitivity, ladder and expiry;
+        the caller passes what Linking knows: the chat itself and the Linker.
+        The backend defaults to Laya but is Jev when Laya is not deployed
+        (§5). Every Category in the table starts enabled (§12: custom
+        Categories are reserved for later, so today that is all of them).
         """
         chat = await self.get(chat_id)
         if chat is not None:
+            if chat.status == "removed":
+                chat.status = "active"
+                chat.removed_at = None
+                chat.linker_id = linker_id
+                await self.session.flush()
             return chat
 
         chat = Chat(
@@ -155,4 +163,53 @@ class ChatRepository:
         if chat is None:
             return
         chat.expiry_seconds = expiry_seconds
+        await self.session.flush()
+
+    # --- The chat lifecycle (§10): Suspended, Removed, and the way back -----
+
+    async def mark_suspended(self, chat_id: int) -> None:
+        """The bot lost a required right: checks stop until it is back (§10)."""
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.status = "suspended"
+        await self.session.flush()
+
+    async def mark_active(self, chat_id: int) -> None:
+        """The rights came back: checks resume (§10)."""
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.status = "active"
+        chat.removed_at = None
+        await self.session.flush()
+
+    async def mark_removed(self, chat_id: int, *, removed_at: datetime) -> None:
+        """The bot was removed or banned: `removed_at` starts the retention (§10)."""
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.status = "removed"
+        chat.removed_at = removed_at
+        await self.session.flush()
+
+    async def due_removed_chats(
+        self, now: datetime, *, removed_chat_days: int
+    ) -> list[Chat]:
+        """Removed Chats whose retention has run out (§11): the purge job's input."""
+        horizon = now - timedelta(days=removed_chat_days)
+        rows = await self.session.scalars(
+            select(Chat)
+            .where(Chat.status == "removed", Chat.removed_at.is_not(None))
+            .where(Chat.removed_at <= horizon)
+            .order_by(Chat.removed_at)
+        )
+        return list(rows)
+
+    async def purge(self, chat_id: int) -> None:
+        """Delete the chat row; every chat-scoped row goes with it by cascade (§10)."""
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        await self.session.delete(chat)
         await self.session.flush()
