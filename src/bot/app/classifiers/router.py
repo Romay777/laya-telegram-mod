@@ -107,6 +107,29 @@ class BackendRouter:
         async with self._semaphore:
             return await self._check_unguarded(backend, state)
 
+    @property
+    def laya_deployed(self) -> bool:
+        """Laya answered /health at least once since the bot started (§5)."""
+        return (
+            self._clients.get(LAYA) is not None
+            and self._health is not None
+            and self._health.deployed
+        )
+
+    @property
+    def laya_healthy(self) -> bool:
+        """The last /health probe succeeded (§5)."""
+        return (
+            self._clients.get(LAYA) is not None
+            and self._health is not None
+            and self._health.healthy
+        )
+
+    @property
+    def jev_available(self) -> bool:
+        """Jev counts as available only when a key is set — a client exists (§5)."""
+        return self._clients.get(JEV) is not None
+
     async def _check_unguarded(self, backend: str, state: dict[str, Any]) -> BackendCheck:
         client = self._clients.get(backend)
         if client is None:

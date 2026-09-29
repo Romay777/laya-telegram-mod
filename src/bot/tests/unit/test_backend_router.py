@@ -206,3 +206,31 @@ async def test_no_fallback_without_a_health_prober() -> None:
 
     assert check.outcome is CheckSkip.UNAVAILABLE
     assert laya.calls == []
+
+
+def test_the_router_reports_which_backends_are_available() -> None:
+    """The Menu's `disabled` buttons read these facts (§5)."""
+    router = healthy_router(StubClient(), StubClient())
+
+    assert router.laya_deployed is True
+    assert router.laya_healthy is True
+    assert router.jev_available is True
+
+
+def test_the_router_reports_an_undeployed_laya() -> None:
+    router = BackendRouter(
+        laya=StubClient(), jev=StubClient(), health=StubHealth(deployed=False, healthy=False)
+    )
+
+    assert router.laya_deployed is False
+    assert router.laya_healthy is False
+    assert router.jev_available is True
+
+
+def test_the_router_reports_absence_as_unavailability() -> None:
+    """No client at all: neither backend is available (§5)."""
+    router = BackendRouter(laya=None, jev=None, health=None)
+
+    assert router.laya_deployed is False
+    assert router.laya_healthy is False
+    assert router.jev_available is False
