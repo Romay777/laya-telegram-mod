@@ -11,6 +11,12 @@ from app.config import DEFAULT_CONFIG_PATH, Settings, default_thresholds
 _ENV = {"BOT_TOKEN": "42:test", "DATABASE_URL": "postgresql+asyncpg://x/y"}
 
 
+def _write(tmp_path: Path, toml_text: str) -> Path:
+    config = tmp_path / "config.toml"
+    config.write_text(toml_text)
+    return config
+
+
 def thresholds_from(tmp_path: Path, toml_text: str) -> dict[str, dict[str, tuple[float, float]]]:
     config = tmp_path / "config.toml"
     config.write_text(toml_text)
@@ -63,3 +69,11 @@ def test_a_combination_missing_from_config_toml_falls_back_to_the_defaults(
 
     assert thresholds["laya"]["lenient"] == (0.95, 0.75)
     assert thresholds["jev"]["balanced"] == (0.90, 0.60)
+
+
+def test_the_shipped_signal_shifts_are_the_section_three_values() -> None:
+    """All §3 shift values come from config (issue #15): defaults and override."""
+    settings = Settings.load(env=_ENV, config_path=DEFAULT_CONFIG_PATH)
+    assert settings.signals.new_member_link == -0.10
+    assert settings.signals.invite_link == -0.05
+    assert settings.signals.established_member == 0.05
