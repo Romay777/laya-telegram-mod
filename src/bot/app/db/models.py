@@ -273,6 +273,21 @@ class AdminAlert(Base):
     subject_id: Mapped[int] = mapped_column()
 
 
+class BackendIncident(Base):
+    """One backend outage (§5, §12): opened by the first failed check, closed
+    by the first success. Open rows keep restarts from re-alerting."""
+
+    __tablename__ = "backend_incident"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # laya | jev.
+    backend: Mapped[str] = mapped_column(String(16), index=True)
+    # The short phrase the incident Admin Alert quotes (§5).
+    reason: Mapped[str] = mapped_column(String(255))
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ChatNotice(Base):
     """The bot's own Violation announcement, deleted at `delete_at` (§7, §12)."""
 
