@@ -38,6 +38,7 @@ class Scheduler:
         core: BaseCore,
         auto_close_h: int = 24,
         summary_after_h: int = 48,
+        removed_chat_days: int = 30,
         interval_s: float = INTERVAL_S,
     ) -> None:
         self._bot = bot
@@ -46,6 +47,7 @@ class Scheduler:
         self._core = core
         self._auto_close_h = auto_close_h
         self._summary_after_h = summary_after_h
+        self._removed_chat_days = removed_chat_days
         self._interval_s = interval_s
 
     async def run_once(self) -> None:
@@ -73,6 +75,14 @@ class Scheduler:
 
             for chat in await ChatRepository(session).due_observation_summaries(now):
                 await self._send_summary(session, chat)
+
+            # §10: a Removed Chat's settings are kept for the retention
+            # window, then the row goes — and every chat-scoped row with it
+            # by cascade (ADR-0001).
+            for chat in await ChatRepository(session).due_removed_chats(
+                now, removed_chat_days=self._removed_chat_days
+            ):
+                await ChatRepository(session).purge(chat.chat_id)
 
             await session.commit()
 

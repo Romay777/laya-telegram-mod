@@ -225,6 +225,7 @@ async def run() -> None:
         core=i18n.core,
         auto_close_h=settings.suspicions.auto_close_h,
         summary_after_h=settings.observation.summary_after_h,
+        removed_chat_days=settings.retention.removed_chat_days,
     )
     scheduler_task = asyncio.create_task(scheduler.run_forever())
     # §5: the health prober runs beside the poller at health_interval_s; the

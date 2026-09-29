@@ -6,24 +6,36 @@ DB state (§17). "Suspension and re-activation" is a named row of §17.
 """
 
 from collections.abc import AsyncIterator, Iterator
+from datetime import timedelta
 from itertools import count
 
 import pytest
-from aiogram.methods import GetChatMember, RestrictChatMember
+from aiogram.methods import GetChat, GetChatMember, RestrictChatMember
 from aiogram.types import ChatPermissions
-from app.db.models import AdminAlert, Chat, MessageCheck, Violation
+from app.db.models import AdminAlert, Chat, Member, MessageCheck, Violation
+from app.scheduler import Scheduler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.support.harness import (
+    FIXED_NOW,
     TestApp,
     app_fixture,
+    auto_moderation_chat,
     linked_via_deeplink,
 )
-from tests.support.telegram import member_administrator, member_member
+from tests.support.telegram import (
+    BOT_USER,
+    chat_facts,
+    member_administrator,
+    member_member,
+    member_owner,
+)
 from tests.support.updates import (
     bot_membership_update,
+    forwarded_message_update,
     group_message_update,
+    private_callback_update,
     user,
 )
 
@@ -285,3 +297,130 @@ async def test_an_unrelated_bad_request_does_not_suspend(
 
     chat = await stored_chat(app.session_maker, chat_id)
     assert chat is not None and chat.status == "active"
+
+
+# --- Removal, re-add within the window, and the purge (§10, §11) --------------
+
+
+async def remove_bot(app: TestApp, admin_id: int, chat_id: int) -> None:
+    """The bot is removed from an already-linked chat (§10)."""
+    # The removal alert's fan-out re-checks the Linker's Admin status.
+    app.session.script(GetChatMember, member_administrator(user(admin_id)))
+    await app.feed(
+        bot_membership_update(chat_id, "supergroup", linker_id=admin_id, new_status="left")
+    )
+
+
+async def test_removal_records_removed_at_and_alerts_the_linker(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    await linked_via_deeplink(app, admin_id, chat_id)
+    app.session.calls.clear()
+
+    await remove_bot(app, admin_id, chat_id)
+
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None
+    assert chat.status == "removed"
+    assert chat.removed_at == FIXED_NOW
+
+    (alert_call,) = app.session.calls_of("SendMessage")
+    assert "was removed" in alert_call.method.text
+    assert "30 days" in alert_call.method.text
+
+
+async def test_re_adding_within_the_window_restores_the_settings(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """The 30-day retention keeps the row; a re-add brings the settings back (§10)."""
+    await auto_moderation_chat(app, admin_id, chat_id)
+    app.session.calls.clear()
+    await remove_bot(app, admin_id, chat_id)
+
+    # Five days later the bot is re-added by deep link: the intent is minted
+    # after the removal, then the promotion update completes the re-link.
+    app.clock.advance(timedelta(days=5))
+    await app.feed(private_callback_update(admin_id, "menu:add-to-chat:", 5, language_code="en"))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        bot_membership_update(chat_id, "supergroup", linker_id=admin_id, new_status="administrator")
+    )
+
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None
+    assert chat.status == "active"
+    assert chat.removed_at is None
+    assert chat.mode == "auto"  # the settings survived the removal
+    assert chat.linker_id == admin_id
+
+    # A home press lists the chat again, and no second "linked" row exists.
+    async with app.session_maker() as db:
+        chats = (await db.execute(select(Chat))).scalars().all()
+    assert [row.chat_id for row in chats] == [chat_id]
+
+
+async def test_re_adding_by_hand_within_the_window_restores_too(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    """The fallback path re-links a Removed Chat the same way (§10)."""
+    from tests.support.harness import started_admin
+
+    await auto_moderation_chat(app, admin_id, chat_id)
+    app.session.calls.clear()
+    await remove_bot(app, admin_id, chat_id)
+
+    app.clock.advance(timedelta(days=3))
+    menu = await started_admin(app, admin_id)
+    await app.feed(private_callback_update(admin_id, "menu:add-to-chat:", menu, language_code="en"))
+    await app.feed(
+        private_callback_update(admin_id, "menu:added-already:", menu, language_code="en")
+    )
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", "My Chat"))
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        forwarded_message_update(admin_id, origin_chat_id=chat_id, message_id=9, language_code="en")
+    )
+
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None
+    assert chat.status == "active"
+    assert chat.mode == "auto"
+
+
+async def test_the_scheduler_purges_the_chat_after_the_window(
+    app: TestApp, admin_id: int, chat_id: int, member_id: int
+) -> None:
+    """31 days after removal the scheduler deletes the row; cascade takes the rest."""
+    await auto_moderation_chat(app, admin_id, chat_id)
+    # One Member row exists, so the cascade has something to take.
+    async with app.session_maker() as db:
+        db.add(Member(chat_id=chat_id, user_id=member_id, first_seen_at=FIXED_NOW))
+        await db.commit()
+
+    await remove_bot(app, admin_id, chat_id)
+
+    # Day 29: still kept.
+    app.clock.advance(timedelta(days=29))
+    await Scheduler(
+        bot=app.bot,
+        session_maker=app.session_maker,
+        clock=app.clock,
+        core=app.i18n.core,
+    ).run_once()
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.status == "removed"
+
+    # Day 30+: the purge.
+    app.clock.advance(timedelta(days=2))
+    await Scheduler(
+        bot=app.bot,
+        session_maker=app.session_maker,
+        clock=app.clock,
+        core=app.i18n.core,
+    ).run_once()
+    assert await stored_chat(app.session_maker, chat_id) is None
+
+    async with app.session_maker() as db:
+        members = (await db.execute(select(Member))).scalars().all()
+    assert members == []
