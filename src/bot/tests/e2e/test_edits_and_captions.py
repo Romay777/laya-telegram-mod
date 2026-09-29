@@ -7,7 +7,7 @@ recorded Bot API calls and the DB state (§17).
 """
 
 from collections.abc import AsyncIterator, Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from itertools import count
 
 import pytest
