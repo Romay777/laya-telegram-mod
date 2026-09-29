@@ -156,6 +156,21 @@ class AdminSubscription(Base):
     alert_mode: Mapped[str] = mapped_column(String(16), default="off")
 
 
+class Member(Base):
+    """Member tracking (§12): one row per (chat, member), created on the
+    Member's first checked message. It feeds the §3 signals."""
+
+    __tablename__ = "member"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    checked_count: Mapped[int] = mapped_column(default=0)
+    flagged_count: Mapped[int] = mapped_column(default=0)
+
+
 class MessageCheck(Base):
     """One classifier check (§12): the Verdict and probabilities, never the text."""
 
