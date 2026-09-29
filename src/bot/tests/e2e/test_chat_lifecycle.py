@@ -9,8 +9,9 @@ from collections.abc import AsyncIterator, Iterator
 from itertools import count
 
 import pytest
-from aiogram.methods import GetChatMember
-from app.db.models import AdminAlert, Chat, MessageCheck
+from aiogram.methods import GetChatMember, RestrictChatMember
+from aiogram.types import ChatPermissions
+from app.db.models import AdminAlert, Chat, MessageCheck, Violation
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -19,7 +20,7 @@ from tests.support.harness import (
     app_fixture,
     linked_via_deeplink,
 )
-from tests.support.telegram import member_administrator
+from tests.support.telegram import member_administrator, member_member
 from tests.support.updates import (
     bot_membership_update,
     group_message_update,
@@ -192,3 +193,95 @@ async def test_a_suspended_chat_checks_nothing(
     async with app.session_maker() as db:
         checks = (await db.execute(select(MessageCheck))).scalars().all()
     assert checks == []
+
+
+# --- A failed restrictChatMember suspends the chat (§6, §10) -----------------
+
+
+async def test_a_failed_restriction_suspends_and_stops_the_notice(
+    app: TestApp, admin_id: int, chat_id: int, member_id: int
+) -> None:
+    """restrictChatMember fails for lack of rights: the chat suspends (§10)."""
+    from aiogram.exceptions import TelegramBadRequest
+
+    from tests.support.harness import auto_moderation_chat
+
+    await auto_moderation_chat(app, admin_id, chat_id)
+    # The sender is a plain Member; the Suspension alert's fan-out later
+    # re-checks the Linker's Admin status — in that order.
+    app.session.script(GetChatMember, member_member(user(member_id)))
+    app.session.script(GetChatMember, member_administrator(user(admin_id)))
+    # The Restriction the pipeline is about to make is refused: the bot
+    # does not hold `can_restrict_members` any more.
+    app.session.script(
+        RestrictChatMember,
+        TelegramBadRequest(
+            method=RestrictChatMember(
+                chat_id=chat_id, user_id=member_id, permissions=ChatPermissions()
+            ),
+            message="Bad Request: not enough rights to restrict/unrestrict chat member",
+        ),
+    )
+
+    app.backend.script(SPAMMY)
+    await app.feed(
+        group_message_update(chat_id, member_id, SPAM_TEXT, message_id=88, sender_name="Spammer")
+    )
+
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.status == "suspended"
+
+    # The message was deleted and the Violation recorded, but no Chat
+    # Notice follows — the Suspension alert takes over (§6, §10).
+    names = app.session.call_names()
+    assert "DeleteMessage" in names
+    assert "RestrictChatMember" in names
+    assert "SendMessage" not in names or all(
+        call.method.chat_id == admin_id for call in app.session.calls_of("SendMessage")
+    )
+    (alert_call,) = [
+        call for call in app.session.calls_of("SendMessage") if call.method.chat_id == admin_id
+    ]
+    assert "suspended" in alert_call.method.text
+
+    async with app.session_maker() as db:
+        (violation,) = (await db.execute(select(Violation))).scalars().all()
+    assert violation.chat_id == chat_id
+
+    # The Member signal row got the flagged check before the suspension.
+    async with app.session_maker() as db:
+        (check,) = (await db.execute(select(MessageCheck))).scalars().all()
+    assert check.outcome == "violation"
+
+
+async def test_an_unrelated_bad_request_does_not_suspend(
+    app: TestApp, admin_id: int, chat_id: int, member_id: int
+) -> None:
+    """A Restriction refused for another reason leaves the chat active (§10)."""
+    from aiogram.exceptions import TelegramBadRequest
+
+    from tests.support.harness import auto_moderation_chat
+
+    await auto_moderation_chat(app, admin_id, chat_id)
+    # The sender is a plain Member; the pipeline asks before it checks.
+    app.session.script(GetChatMember, member_member(user(member_id)))
+    app.session.script(
+        RestrictChatMember,
+        TelegramBadRequest(
+            method=RestrictChatMember(
+                chat_id=chat_id, user_id=member_id, permissions=ChatPermissions()
+            ),
+            message="Bad Request: PARTICIPANT_ID_INVALID",
+        ),
+    )
+
+    app.backend.script(SPAMMY)
+    with pytest.raises(TelegramBadRequest):
+        await app.feed(
+            group_message_update(
+                chat_id, member_id, SPAM_TEXT, message_id=89, sender_name="Spammer"
+            )
+        )
+
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.status == "active"

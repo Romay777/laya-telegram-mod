@@ -150,6 +150,7 @@ def build_dispatcher(
         fanout=fanout,
         notices=notice_queue,
         session_maker=session_maker,
+        lifecycle=lifecycle,
         shifts=shifts,
     )
     dispatcher = Dispatcher(storage=PostgresStorage(session_maker))

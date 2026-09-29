@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import Message
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -48,6 +48,7 @@ from app.db.repositories.suspicions import SuspicionRepository
 from app.domain.backends import BACKEND_NAMES, JEV
 from app.domain.decision import OUTCOME_SUSPICION, OUTCOME_VIOLATION, decide
 from app.domain.signals import adjusted_thresholds, is_established, is_new, threshold_shifts
+from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
 from app.moderation import signals
 from app.moderation.actions import ban_sender_chat, delete_message, restrict_member
@@ -90,6 +91,7 @@ class ModerationPipeline:
         fanout: AlertFanout,
         notices: NoticeQueue,
         session_maker: async_sessionmaker[AsyncSession],
+        lifecycle: ChatLifecycleService,
         shifts: SignalShifts | None = None,
     ) -> None:
         self._clock = clock
@@ -103,6 +105,7 @@ class ModerationPipeline:
         self._fanout = fanout
         self._notices = notices
         self._session_maker = session_maker
+        self._lifecycle = lifecycle
         self._shifts: SignalShifts = shifts if shifts is not None else DEFAULT_SHIFTS
 
     @property
@@ -328,7 +331,10 @@ class ModerationPipeline:
             )
             return
 
-        # §6 order of actions: delete → record → restrict → notice.
+        # §6 order of actions: delete → record → restrict → notice. A
+        # Restriction that fails for lack of rights suspends the chat
+        # (§6, §10): the Violation stands, but no Notice and no alert of
+        # the Violation follows — the Suspension alert takes over.
         await delete_message(bot, message)
         violation = await repo.record_violation(
             chat=chat,
@@ -337,9 +343,18 @@ class ModerationPipeline:
             category=decision.category,
             now=now,
         )
-        await restrict_member(
-            bot, chat.chat_id, sender.id, restricted_until=violation.restricted_until
-        )
+        try:
+            await restrict_member(
+                bot, chat.chat_id, sender.id, restricted_until=violation.restricted_until
+            )
+        except TelegramForbiddenError:
+            await self._suspend_chat(bot, session, chat)
+            return
+        except TelegramBadRequest as failure:
+            if "not enough rights" not in str(failure):
+                raise
+            await self._suspend_chat(bot, session, chat)
+            return
         # §4: a new Violation closes the message's open Suspicion as superseded.
         await SuspicionRepository(session).supersede_open(chat.chat_id, message.message_id, at=now)
         # The Violation becomes durable before anything background refers to
@@ -390,6 +405,18 @@ class ModerationPipeline:
             flagged_entities=entities,
             violation_id=violation.id,
         )
+
+    async def _suspend_chat(
+        self, bot: Bot, session: AsyncSession, chat: Chat
+    ) -> None:
+        """The chat just lost its rights mid-Violation: suspend (§10).
+
+        The Violation is already durable — the Restriction is Telegram's
+        business once the rights are back — and the Suspension alert is
+        committed with the update's own transaction.
+        """
+        await session.commit()
+        await self._lifecycle.suspend_on_failed_restriction(bot, session, chat)
 
     async def _punish_channel(
         self,

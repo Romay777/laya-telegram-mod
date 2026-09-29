@@ -122,6 +122,27 @@ class ChatLifecycleService:
 
     # --- The three transitions ----------------------------------------------
 
+    async def suspend_on_failed_restriction(
+        self, bot: Bot, session: AsyncSession, chat: Chat
+    ) -> None:
+        """A `restrictChatMember` failed for lack of rights: suspend (§6, §10).
+
+        The failing call names no right, so the bot's membership is read
+        live; when Telegram will not say either, `can_restrict_members` —
+        the right the failed call needed — stands for the list.
+        """
+        bot_member = await self._bot_member(bot, chat.chat_id)
+        missing = (
+            rights_missing(
+                status=bot_member.status,
+                can_delete_messages=bool(getattr(bot_member, "can_delete_messages", False)),
+                can_restrict_members=bool(getattr(bot_member, "can_restrict_members", False)),
+            )
+            if bot_member is not None
+            else ("can_restrict_members",)
+        )
+        await self._suspend(bot, session, chat, missing or ("can_restrict_members",))
+
     async def _suspend(
         self,
         bot: Bot,
