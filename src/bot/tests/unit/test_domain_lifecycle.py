@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.domain.lifecycle import LifecycleAction, lifecycle_outcome, removed_after
 
+
 def test_active_chat_losing_a_required_right_suspends_and_names_it() -> None:
     outcome = lifecycle_outcome(
         was_active=True,
