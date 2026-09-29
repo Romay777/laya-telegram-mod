@@ -13,11 +13,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.alerts.fanout import AlertFanout
 from app.alerts.lift import lift_violation
 from app.alerts.suspicion import decide_suspicion
+from app.alerts.unban import unban_channel
 from app.clock import Clock
 from app.db.repositories.chats import ChatRepository
 from app.i18n import translator_for
 from app.linking.admin_cache import AdminCache
-from app.menu.callbacks import LiftRestrictionCallback, SuspicionDecideCallback
+from app.menu.callbacks import (
+    LiftRestrictionCallback,
+    SuspicionDecideCallback,
+    UnbanChannelCallback,
+)
 from app.notices.queue import NoticeQueue
 from app.notices.sender import DEFAULT_MAX_LIFETIME_H
 
@@ -63,6 +68,34 @@ def create_alerts_router(max_notice_lifetime_h: int = DEFAULT_MAX_LIFETIME_H) ->
             ),
             show_alert=False,
         )
+
+    @router.callback_query(UnbanChannelCallback.filter(), F.message.chat.type == "private")
+    async def unban_channel_press(
+        callback: CallbackQuery,
+        callback_data: UnbanChannelCallback,
+        bot: Bot,
+        session: AsyncSession,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+    ) -> None:
+        """🟢 Unban on a foreign channel's Violation alert (§4)."""
+        # Every chat-scoped callback re-checks Admin access (§13).
+        if not await admin_cache.is_admin(bot, callback_data.chat_id, callback.from_user.id):
+            await callback.answer(
+                text=translator_for(i18n.core, i18n.locale)("menu-chat-access-lost"),
+                show_alert=False,
+            )
+            return
+        await unban_channel(
+            bot,
+            session,
+            core=i18n.core,
+            chat_id=callback_data.chat_id,
+            violation_id=callback_data.violation_id,
+            admin=callback.from_user,
+            locale=i18n.locale,
+        )
+        await callback.answer()
 
     @router.callback_query(SuspicionDecideCallback.filter(), F.message.chat.type == "private")
     async def decide_suspicion_press(

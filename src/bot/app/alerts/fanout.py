@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.alerts.rendering import (
     message_link,
     render_appeal_alert,
+    render_channel_alert,
     render_incident_alert,
     render_suspicion_alert,
     render_violation_alert,
@@ -48,6 +49,7 @@ from app.menu.callbacks import (
     JournalCallback,
     LiftRestrictionCallback,
     SuspicionDecideCallback,
+    UnbanChannelCallback,
 )
 from app.menu.screens.buttons import DANGER, SUCCESS
 
@@ -153,6 +155,23 @@ def suspicion_keyboard(t: GetText, chat_id: int, suspicion_id: int) -> InlineKey
                         chat_id=chat_id, suspicion_id=suspicion_id, punish=False
                     ).pack(),
                 ),
+            ]
+        ]
+    )
+
+
+def unban_keyboard(t: GetText, chat_id: int, violation_id: int) -> InlineKeyboardMarkup:
+    """The 🟢 Unban button of a foreign channel's Violation alert (§4)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("alert-unban-button"),
+                    callback_data=UnbanChannelCallback(
+                        chat_id=chat_id, violation_id=violation_id
+                    ).pack(),
+                    style=SUCCESS,
+                )
             ]
         ]
     )
@@ -435,6 +454,55 @@ class AlertFanout:
                     subject_type="incident",
                     subject_id=incident_id,
                 )
+
+    async def channel_violation_alert(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        channel_id: int,
+        channel_title: str,
+        category: str,
+        confidence: float,
+        flagged_text: str | None,
+        flagged_entities: list[dict[str, Any]] | None,
+        violation_id: int,
+    ) -> None:
+        """A foreign channel was banned over one message (§4).
+
+        No ladder, no Restriction, no Chat Notice and no Appeal exists here;
+        the Admins subscribed with `all` get the facts and a 🟢 Unban button,
+        recorded under the subject `violation` so an unban edits every copy.
+        """
+        recipients = await AdminSubscriptionRepository(session).user_ids_with_mode(
+            chat.chat_id, alert_mode="all"
+        )
+        async for admin_id, _user, t in self._recipients(
+            bot, session, admin_cache, chat, recipients
+        ):
+            text, entities = render_channel_alert(
+                t,
+                chat_title=chat.title or str(chat.chat_id),
+                channel_title=channel_title,
+                category=category,
+                confidence=confidence,
+                flagged_text=flagged_text,
+                flagged_entities=flagged_entities,
+            )
+            await self._send_alert(
+                bot,
+                session,
+                chat=chat,
+                admin_id=admin_id,
+                t=t,
+                text=text,
+                entities=entities,
+                markup=unban_keyboard(t, chat.chat_id, violation_id),
+                subject_type="violation",
+                subject_id=violation_id,
+            )
 
     async def _translator_of(self, session: AsyncSession, admin_id: int) -> GetText:
         """The translator of an Admin's interface language (§15)."""

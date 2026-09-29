@@ -42,6 +42,38 @@ class SuspicionRepository:
     async def get(self, suspicion_id: int) -> Suspicion | None:
         return await self.session.get(Suspicion, suspicion_id)
 
+    async def open_id(self, chat_id: int, message_id: int) -> int | None:
+        """The id of the message's open (pending) Suspicion, if any (§4).
+
+        Edits are re-checked from scratch; a message whose original was
+        already flagged must not be alerted on twice.
+        """
+        return await self.session.scalar(
+            select(Suspicion.id).where(
+                Suspicion.chat_id == chat_id,
+                Suspicion.message_id == message_id,
+                Suspicion.status == "pending",
+            )
+        )
+
+    async def supersede_open(self, chat_id: int, message_id: int, *, at: datetime) -> bool:
+        """Close the message's open Suspicion as `superseded` (§4).
+
+        A new Violation on the same message — the original flagged as a
+        Suspicion, then the edit confirmed as a Violation — wins without a
+        click: `decided_by` stays empty because no Admin decided.
+        """
+        result = await self.session.execute(
+            update(Suspicion)
+            .where(
+                Suspicion.chat_id == chat_id,
+                Suspicion.message_id == message_id,
+                Suspicion.status == "pending",
+            )
+            .values(status="superseded", decided_at=at)
+        )
+        return bool(result.rowcount)
+
     async def decide(self, suspicion_id: int, *, status: str, by: int | None, at: datetime) -> bool:
         """Apply one decision press; `False` when somebody was faster (§9).
 

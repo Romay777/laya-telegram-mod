@@ -32,3 +32,7 @@ summary-punished = Наказано вами: {$count}
 alert-incident = ⚠️ {$backend} недоступен: {$reason}
 alert-incident-with-laya = ⚠️ {$backend} недоступен: {$reason}. Используется Laya
 alert-incident-recovery = ✅ {$backend} снова работает
+alert-channel-header = ⚠️ Канал забанен в чате {$chat}
+alert-channel-name = Канал: {$channel}
+alert-unban-button = 🟢 Разбанить
+alert-channel-unbanned = ✅ Канал разбанил {$admin}

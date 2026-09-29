@@ -1,12 +1,25 @@
 """The moderation pipeline (§4): filters → check → Decision → actions.
 
-One entry point per incoming group message. Each step can stop the
+One entry point per incoming group message or edit. Each step can stop the
 pipeline; the actions on a Violation run in the §6 order — delete, record,
 restrict, enqueue the notice — and the recording rules of §4 step 9 hold
 throughout: every check writes a `message_check` row without text, and
 only flagged messages keep theirs, in `flagged_message` until the
 retention passes. The Chat Notice itself goes through the per-chat
 rate-limited queue (§7); deleting and restricting are never delayed by it.
+
+The §3 signals — the Member row plus the text — move both thresholds only;
+the adjusted values are clamped to [0.05, 0.99], and the shift values come
+from config. An edit is checked again from scratch (§4), but edits to
+messages older than 48 hours are skipped: Telegram no longer allows
+deleting them, so a Violation could no longer be carried out. An open
+Suspicion on the same message is never alerted twice, and a new Violation
+closes it as `superseded`.
+
+A `sender_chat` that is neither the chat itself nor its linked channel is
+a foreign channel. Its Violation deletes the message and bans the sender
+chat outright — no ladder, no Restriction of a user, no Chat Notice, no
+Appeal (§4) — and the Admins get an Admin Alert with a 🟢 Unban button.
 """
 
 import time
@@ -15,6 +28,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -27,14 +41,16 @@ from app.clock import Clock
 from app.db.models import Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.incidents import IncidentRepository
+from app.db.repositories.members import MemberRepository
 from app.db.repositories.moderation import ModerationRepository
 from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.suspicions import SuspicionRepository
 from app.domain.backends import BACKEND_NAMES, JEV
-from app.domain.decision import decide
+from app.domain.decision import OUTCOME_SUSPICION, OUTCOME_VIOLATION, decide
+from app.domain.signals import adjusted_thresholds, is_established, is_new, threshold_shifts
 from app.linking.admin_cache import AdminCache
 from app.moderation import signals
-from app.moderation.actions import delete_message, restrict_member
+from app.moderation.actions import ban_sender_chat, delete_message, restrict_member
 from app.notices.jobs import violation_notice
 from app.notices.queue import NoticeQueue
 
@@ -44,6 +60,19 @@ Thresholds = Mapping[str, Mapping[str, Any]]
 
 #: The model recorded per serving backend (§12): Laya pins its checkpoint.
 Models = Mapping[str, str]
+
+#: The §3 shift values, keyed as config.toml's `[signals]` spells them.
+SignalShifts = Mapping[str, float]
+
+#: The §3 default shifts, used when the caller brings none from config.
+DEFAULT_SHIFTS: dict[str, float] = {
+    "new_member_link": -0.10,
+    "invite_link": -0.05,
+    "established_member": 0.05,
+}
+
+#: Telegram stops allowing deletions after 48 hours (§4 step 2, §9).
+DELETION_WINDOW = timedelta(hours=48)
 
 
 class ModerationPipeline:
@@ -61,6 +90,7 @@ class ModerationPipeline:
         fanout: AlertFanout,
         notices: NoticeQueue,
         session_maker: async_sessionmaker[AsyncSession],
+        shifts: SignalShifts | None = None,
     ) -> None:
         self._clock = clock
         self._core = core
@@ -73,6 +103,7 @@ class ModerationPipeline:
         self._fanout = fanout
         self._notices = notices
         self._session_maker = session_maker
+        self._shifts: SignalShifts = shifts if shifts is not None else DEFAULT_SHIFTS
 
     @property
     def backend(self) -> ClassifierBackend:
@@ -88,7 +119,7 @@ class ModerationPipeline:
         message: Message,
         admin_cache: AdminCache,
     ) -> None:
-        """Check one group message of a Linked Chat and act on the Decision (§4).
+        """Check one group message — or edit — of a Linked Chat and act (§4).
 
         A Suspended Chat checks nothing (§10). Both modes check and record:
         Auto-moderation acts on Violations itself, while Observation Mode
@@ -97,35 +128,63 @@ class ModerationPipeline:
         if chat.status != "active":
             return
 
-        # §4 step 1: Exempt Senders are never checked, not even recorded.
+        # §4 step 1: the Exempt Sender filters. Automatic forwards from the
+        # linked channel and anonymous admins (the chat speaking as itself)
+        # are decided from the update alone; every other sender_chat is a
+        # channel post and stays in the pipeline — a foreign one is checked
+        # like any other message (§4), and only a linked channel of the chat
+        # is exempt.
+        if message.is_automatic_forward:
+            return
         sender = message.from_user
-        if sender is None or sender.is_bot or message.is_automatic_forward:
+        if message.sender_chat is not None:
+            if message.sender_chat.id == chat.chat_id:
+                return  # an anonymous admin speaks as the chat itself (§4 step 1)
+            if message.sender_chat.id == await self._linked_channel_id(bot, chat):
+                return  # a post from the chat's own linked channel (§4 step 1)
+        if sender is None or sender.is_bot:
             return
         if await admin_cache.is_admin(bot, chat.chat_id, sender.id):
             return
 
-        # §4 step 3: text messages only this ticket.
-        text = message.text
+        # §4 step 2: edits to messages older than 48 hours are skipped —
+        # Telegram no longer allows deleting them.
+        is_edit = message.edit_date is not None
+        if is_edit and self._clock.now() - message.date > DELETION_WINDOW:
+            return
+
+        # §4 step 3: the text is `text` or `caption`; a bare photo or a
+        # sticker has neither and is skipped.
+        text = message.text or message.caption
         if text is None:
             return
         entities = [
-            entity.model_dump(mode="json", exclude_none=True) for entity in message.entities or []
+            entity.model_dump(mode="json", exclude_none=True)
+            for entity in message.entities or message.caption_entities or []
         ]
         now = self._clock.now()
         repo = ModerationRepository(session)
 
-        # §4 step 4: the short-message filter.
+        # §4 step 4: the short-message filter. Short skips never reach the
+        # classifier, so they count on no Member row (§3 reads the history
+        # of *checked* messages).
         if signals.is_short(text=text, entities=entities, min_words=self._min_words):
             await self._record(
                 repo,
                 chat,
-                sender.id,
+                message_sender_id(message),
                 message.message_id,
                 backend=chat.backend,
                 outcome="skipped_short",
                 created_at=now,
+                is_edit=is_edit,
             )
             return
+
+        # §4 step 5: the Member's history as it stood before this check (§3).
+        # A channel sender has no Member row and takes no member signals.
+        members = MemberRepository(session)
+        facts = None if sender is None else await members.facts(chat.chat_id, sender.id)
 
         # §4 steps 6-8: classify with the chat's backend, then decide.
         started = time.monotonic()
@@ -149,11 +208,15 @@ class ModerationPipeline:
             await self._record(
                 repo,
                 chat,
-                sender.id,
+                message_sender_id(message),
                 message.message_id,
                 backend=check.served_by,
                 outcome=str(check.outcome),
                 created_at=now,
+                is_edit=is_edit,
+            )
+            await members.note_checked(
+                chat.chat_id, message_sender_id(message), flagged=False, at=now
             )
             return
 
@@ -162,17 +225,48 @@ class ModerationPipeline:
             bot, session, admin_cache, chat=chat, served_by=check.served_by, now=now
         )
 
-        decision = decide(
-            probabilities=check.outcome,
+        violation_threshold, suspicion_threshold = adjusted_thresholds(
             violation_threshold=self._violation_threshold(check.served_by, chat.sensitivity),
             suspicion_threshold=self._suspicion_threshold(check.served_by, chat.sensitivity),
+            shifts=threshold_shifts(
+                is_new_member=facts is not None
+                and is_new(
+                    first_seen_at=facts.first_seen_at,
+                    checked_count=facts.checked_count,
+                    now=now,
+                ),
+                has_link_invite_or_mention=signals.has_link_invite_or_mention(text, entities),
+                has_invite_link=signals.has_invite_link(text, entities),
+                is_established_member=facts is not None
+                and is_established(
+                    first_seen_at=facts.first_seen_at,
+                    checked_count=facts.checked_count,
+                    flagged_count=facts.flagged_count,
+                    now=now,
+                ),
+                shifts=self._shifts,
+            ),
+        )
+
+        decision = decide(
+            probabilities=check.outcome,
+            violation_threshold=violation_threshold,
+            suspicion_threshold=suspicion_threshold,
             mode=chat.mode,
             enabled_categories=await ChatRepository(session).enabled_categories(chat.chat_id),
+        )
+        # The check itself lands on the Member's row; a flagged Verdict
+        # counts as flagged (§3: an Established Member is never flagged).
+        await members.note_checked(
+            chat.chat_id,
+            message_sender_id(message),
+            flagged=decision.outcome in (OUTCOME_VIOLATION, OUTCOME_SUSPICION),
+            at=now,
         )
         recorded = await self._record(
             repo,
             chat,
-            sender.id,
+            message_sender_id(message),
             message.message_id,
             backend=check.served_by,
             outcome=decision.outcome,
@@ -181,14 +275,16 @@ class ModerationPipeline:
             confidence=decision.confidence,
             probabilities=dict(check.outcome),
             latency_ms=latency_ms,
+            is_edit=is_edit,
         )
-        if decision.outcome == "suspicion":
+        if decision.outcome == OUTCOME_SUSPICION:
             await self._raise_suspicion(
                 bot,
                 session,
                 repo,
                 chat=chat,
-                sender=sender,
+                sender_id=message_sender_id(message),
+                member=sender,
                 message_id=message.message_id,
                 check_id=recorded.id,
                 text=text,
@@ -199,7 +295,7 @@ class ModerationPipeline:
                 admin_cache=admin_cache,
             )
             return
-        if decision.outcome != "violation":
+        if decision.outcome != OUTCOME_VIOLATION:
             return
 
         # §4 step 9: the flagged message keeps its text until the retention passes.
@@ -209,6 +305,25 @@ class ModerationPipeline:
             entities=entities,
             purge_at=now + timedelta(days=self._flagged_text_days),
         )
+
+        if message.sender_chat is not None:
+            # A foreign channel: delete and ban the sender chat — no ladder,
+            # no Chat Notice, no Appeal (§4).
+            await self._punish_channel(
+                bot,
+                session,
+                repo,
+                admin_cache=admin_cache,
+                chat=chat,
+                message=message,
+                recorded=recorded,
+                category=decision.category,
+                confidence=decision.confidence,
+                text=text,
+                entities=entities,
+                now=now,
+            )
+            return
 
         # §6 order of actions: delete → record → restrict → notice.
         await delete_message(bot, message)
@@ -222,6 +337,8 @@ class ModerationPipeline:
         await restrict_member(
             bot, chat.chat_id, sender.id, restricted_until=violation.restricted_until
         )
+        # §4: a new Violation closes the message's open Suspicion as superseded.
+        await SuspicionRepository(session).supersede_open(chat.chat_id, message.message_id, at=now)
         # The Violation becomes durable before anything background refers to
         # it: the queue's drain posts the notice from its own session, which
         # cannot see this request's uncommitted transaction.
@@ -271,6 +388,65 @@ class ModerationPipeline:
             violation_id=violation.id,
         )
 
+    async def _punish_channel(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        repo: ModerationRepository,
+        *,
+        admin_cache: AdminCache,
+        chat: Chat,
+        message: Message,
+        recorded: Any,
+        category: str,
+        confidence: float,
+        text: str,
+        entities: list[dict[str, Any]],
+        now: datetime,
+    ) -> None:
+        """A foreign channel's Violation: delete, then ban the sender chat (§4).
+
+        There is no Penalty Ladder, no Restriction of a user, no Chat Notice
+        and no Appeal in this case. The Violation row is recorded without a
+        Restriction — §12 reserves a NULL `restriction_seconds` for the
+        sender-chat ban — and the Admins get an alert with a 🟢 Unban button.
+        """
+        sender_chat = message.sender_chat
+        assert sender_chat is not None  # the caller checked
+        await delete_message(bot, message)
+        violation = await repo.record_violation(
+            chat=chat,
+            user_id=sender_chat.id,
+            check_id=recorded.id,
+            category=category,
+            now=now,
+            sender_chat_ban=True,
+        )
+        await ban_sender_chat(bot, chat.chat_id, sender_chat.id)
+        # Durable before the alert fan-out reads the copies back (§9).
+        await session.commit()
+        await self._fanout.channel_violation_alert(
+            bot,
+            session,
+            admin_cache=admin_cache,
+            chat=chat,
+            channel_id=sender_chat.id,
+            channel_title=sender_chat.title or str(sender_chat.id),
+            category=category,
+            confidence=confidence,
+            flagged_text=text,
+            flagged_entities=entities,
+            violation_id=violation.id,
+        )
+
+    async def _linked_channel_id(self, bot: Bot, chat: Chat) -> int | None:
+        """The chat's linked channel, as Telegram reports it (§4 step 1)."""
+        try:
+            full = await bot.get_chat(chat.chat_id)
+        except TelegramAPIError:
+            return None  # no answer: nothing to match the sender_chat against
+        return full.linked_chat_id
+
     async def _record(
         self,
         repo: ModerationRepository,
@@ -285,6 +461,7 @@ class ModerationPipeline:
         confidence: float | None = None,
         probabilities: Probabilities | None = None,
         latency_ms: int | None = None,
+        is_edit: bool = False,
     ) -> Any:
         """One `message_check` row: the Verdict and probabilities, no text (§12).
 
@@ -304,6 +481,7 @@ class ModerationPipeline:
             confidence=confidence,
             probabilities=probabilities,
             latency_ms=latency_ms,
+            is_edit=is_edit,
         )
 
     async def _note_failure(
@@ -376,7 +554,8 @@ class ModerationPipeline:
         repo: ModerationRepository,
         *,
         chat: Chat,
-        sender: Any,
+        sender_id: int,
+        member: Any,
         message_id: int,
         check_id: int,
         text: str,
@@ -390,7 +569,9 @@ class ModerationPipeline:
 
         The message stays in the chat; its text is kept for the alert and
         the later decision, and the Admins subscribed with `all` are asked
-        to 🔴 Punish or Dismiss.
+        to 🔴 Punish or Dismiss. A message that already has an open
+        Suspicion — its original was flagged, then the edit was too — gets
+        no second row and no second alert (§4).
         """
         # §4 step 9: the flagged message keeps its text until the retention passes.
         await repo.store_flagged(
@@ -399,10 +580,13 @@ class ModerationPipeline:
             entities=entities,
             purge_at=now + timedelta(days=self._flagged_text_days),
         )
-        suspicion = await SuspicionRepository(session).create(
+        suspicions = SuspicionRepository(session)
+        if await suspicions.open_id(chat.chat_id, message_id) is not None:
+            return
+        suspicion = await suspicions.create(
             check_id=check_id,
             chat_id=chat.chat_id,
-            user_id=sender.id,
+            user_id=sender_id,
             message_id=message_id,
             created_at=now,
         )
@@ -411,7 +595,7 @@ class ModerationPipeline:
             session,
             admin_cache=admin_cache,
             chat=chat,
-            member_name=sender.first_name or str(sender.id),
+            member_name=getattr(member, "first_name", None) or str(sender_id),
             category=category,
             confidence=confidence,
             suspicion_id=suspicion.id,
@@ -431,3 +615,11 @@ class ModerationPipeline:
     def _suspicion_threshold(self, backend: str, sensitivity: str) -> float:
         """The lower zone's threshold, from the same Sensitivity preset (§3)."""
         return self._thresholds[backend][sensitivity].suspicion
+
+
+def message_sender_id(message: Message) -> int:
+    """Who a check is attributed to: the Member, or the channel (§12)."""
+    if message.from_user is not None:
+        return message.from_user.id
+    assert message.sender_chat is not None
+    return message.sender_chat.id

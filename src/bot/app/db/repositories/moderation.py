@@ -35,12 +35,18 @@ class ModerationRepository:
         confidence: float | None = None,
         probabilities: dict[str, float] | None = None,
         latency_ms: int | None = None,
+        is_edit: bool = False,
     ) -> MessageCheck:
-        """One pipeline check: the Verdict and probabilities, never the text (§12)."""
+        """One pipeline check: the Verdict and probabilities, never the text (§12).
+
+        `is_edit` marks the re-check of an `edited_message` update (§4): each
+        edit is checked again from scratch, and the row remembers it.
+        """
         check = MessageCheck(
             chat_id=chat_id,
             user_id=user_id,
             message_id=message_id,
+            is_edit=is_edit,
             backend=backend,
             model=model,
             spec_version=spec_version,
@@ -73,13 +79,35 @@ class ModerationRepository:
         category: str,
         now: datetime,
         source: str = "auto",
+        sender_chat_ban: bool = False,
     ) -> Violation:
         """Record one Violation and the Restriction it applies (§6, in order).
 
         `active` counts the Member's unexpired, unrevoked Violations; the Step
         taken is `ladder[min(active, len(ladder)) - 1]`. The Restriction fields
         store what was applied, so the pipeline restricts from the row.
+
+        `sender_chat_ban` records a foreign channel's Violation (§4): the
+        channel was banned outright, so no Restriction of a user is stored —
+        §12 reserves `restriction_seconds = NULL` for exactly this, and no
+        Step is taken.
         """
+        if sender_chat_ban:
+            violation = Violation(
+                chat_id=chat.chat_id,
+                user_id=user_id,
+                check_id=check_id,
+                category=category,
+                source=source,
+                step_index=0,
+                restriction_seconds=None,
+                restricted_until=None,
+                expires_at=None,
+                created_at=now,
+            )
+            self.session.add(violation)
+            await self.session.flush()
+            return violation
         active = await self.count_active(chat.chat_id, user_id, now)
         step_index, step_seconds = select_step(chat.ladder, active_count=active + 1)
         expires_at = (

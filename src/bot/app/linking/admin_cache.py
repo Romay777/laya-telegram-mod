@@ -43,3 +43,11 @@ class AdminCache:
         is_admin = member.status in ADMIN_STATUSES
         self._entries[key] = _Entry(expires_at=now + self._ttl, is_admin=is_admin)
         return is_admin
+
+    def invalidate(self, chat_id: int, user_id: int) -> None:
+        """Forget one (chat, user) answer (§4 step 1).
+
+        `chat_member` updates tell the bot a membership changed — a promotion,
+        a demotion — and a cached answer from before the change must not stand.
+        """
+        self._entries.pop((chat_id, user_id), None)

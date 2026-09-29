@@ -1,8 +1,8 @@
-"""Moderation actions over the Bot API (§2, §6): delete, restrict, lift.
+"""Moderation actions over the Bot API (§2, §6): delete, restrict, lift, ban.
 
-Banning a sender chat arrives with its ticket. Deleting tolerates a message
-that is already gone (§6); a failed Restriction means the chat is Suspended
-(§10) and is that ticket's business.
+Deleting tolerates a message that is already gone (§6); a failed Restriction
+means the chat is Suspended (§10) and is that ticket's business. Banning a
+sender chat is the foreign-channel action of §4.
 """
 
 import contextlib
@@ -52,6 +52,16 @@ async def restrict_member(
         until_date=int(restricted_until.timestamp()) if restricted_until else 0,
         use_independent_chat_permissions=True,
     )
+
+
+async def ban_sender_chat(bot: Bot, chat_id: int, sender_chat_id: int) -> None:
+    """Ban a channel from posting in the chat (§4): `banChatSenderChat`."""
+    await bot.ban_chat_sender_chat(chat_id=chat_id, sender_chat_id=sender_chat_id)
+
+
+async def unban_sender_chat(bot: Bot, chat_id: int, sender_chat_id: int) -> None:
+    """Lift a sender-chat ban (§4): the 🟢 Unban button on the Admin Alert."""
+    await bot.unban_chat_sender_chat(chat_id=chat_id, sender_chat_id=sender_chat_id)
 
 
 async def lift_restriction(

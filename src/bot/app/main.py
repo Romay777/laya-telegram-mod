@@ -106,6 +106,7 @@ def build_dispatcher(
     notices_per_second: float = 1,
     notices_per_minute: int = 18,
     max_queue_age_s: int = 300,
+    shifts: Mapping[str, float] | None = None,
 ) -> Dispatcher:
     navigator = MenuNavigator(core=i18n.core)
     classifier_ = classifier if classifier is not None else build_classifier()
@@ -141,6 +142,7 @@ def build_dispatcher(
         fanout=fanout,
         notices=notice_queue,
         session_maker=session_maker,
+        shifts=shifts,
     )
     dispatcher = Dispatcher(storage=PostgresStorage(session_maker))
     dispatcher.update.outer_middleware(DbSessionMiddleware(session_maker))
@@ -200,6 +202,7 @@ async def run() -> None:
         notices_per_second=settings.notices.per_second,
         notices_per_minute=settings.notices.per_minute,
         max_queue_age_s=settings.notices.max_queue_age_s,
+        shifts=dict(settings.signals.__dict__),
     )
     bot = build_bot(settings.bot_token)
     # §11: one loop picks up every due job; Telegram lifts expired

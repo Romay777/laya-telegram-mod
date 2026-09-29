@@ -31,3 +31,7 @@ summary-punished = Punished by you: {$count}
 alert-incident = ⚠️ {$backend} is unavailable: {$reason}
 alert-incident-with-laya = ⚠️ {$backend} is unavailable: {$reason}. Using Laya
 alert-incident-recovery = ✅ {$backend} is back
+alert-channel-header = ⚠️ A channel was banned in {$chat}
+alert-channel-name = Channel: {$channel}
+alert-unban-button = 🟢 Unban
+alert-channel-unbanned = ✅ The channel was unbanned by {$admin}

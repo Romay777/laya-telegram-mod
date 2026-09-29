@@ -15,6 +15,7 @@ from app.notices.durations import duration_text
 __all__ = [
     "message_link",
     "render_appeal_alert",
+    "render_channel_alert",
     "render_incident_alert",
     "render_suspicion_alert",
     "render_violation_alert",
@@ -135,6 +136,35 @@ def render_suspicion_alert(
         "url": url,
     }
     return _quoted_alert(t, header, flagged_text, flagged_entities, header_entities=[link])
+
+
+def render_channel_alert(
+    t: GetText,
+    *,
+    chat_title: str,
+    channel_title: str,
+    category: str,
+    confidence: float,
+    flagged_text: str | None,
+    flagged_entities: list[dict[str, Any]] | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """The foreign-channel alert (§4): the chat, the banned channel, the quote.
+
+    No Member and no Step exists here — the channel was banned outright and
+    has no ladder to climb; the alert carries the 🟢 Unban button instead.
+    """
+    header = "\n".join(
+        [
+            t("alert-channel-header", chat=chat_title),
+            t("alert-channel-name", channel=channel_title),
+            t(
+                "alert-violation-verdict",
+                category=t(f"category-{category}"),
+                confidence=round(confidence * 100),
+            ),
+        ]
+    )
+    return _quoted_alert(t, header, flagged_text, flagged_entities)
 
 
 def render_incident_alert(

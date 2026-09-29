@@ -259,3 +259,14 @@ class JournalCallback(CallbackData, prefix="journal"):
     access (§13)."""
 
     chat_id: int
+
+
+class UnbanChannelCallback(CallbackData, prefix="unban-channel"):
+    """🟢 Unban on a foreign channel's Violation alert (§4).
+
+    Carries the `chat_id` so the handler can re-check Admin access (§13);
+    the press lifts the sender-chat ban.
+    """
+
+    chat_id: int
+    violation_id: int
