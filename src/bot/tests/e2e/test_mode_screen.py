@@ -71,6 +71,7 @@ async def test_the_chat_screen_leads_to_the_mode_switch(
     (
         (enable_auto,),
         (categories,),
+        (_backend,),
         (sensitivity,),
         (ladder,),
         (language,),

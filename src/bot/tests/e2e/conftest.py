@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-_TRUNCATE = text("TRUNCATE bot_user, chat, link_intent, fsm_state CASCADE")
+_TRUNCATE = text("TRUNCATE bot_user, chat, link_intent, fsm_state, backend_incident CASCADE")
 
 
 @pytest.fixture(autouse=True)

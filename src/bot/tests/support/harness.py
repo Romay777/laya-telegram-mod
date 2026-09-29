@@ -10,10 +10,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.methods import GetChatMember
 from aiogram_i18n import I18nMiddleware
+from app.classifiers.router import BackendRouter
 from app.clock import FakeClock
 from app.main import build_dispatcher, build_i18n_middleware
 from app.notices.queue import NoticeQueue
@@ -24,7 +26,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from tests.support.backend import FakeBackend
+from tests.support.backend import ControllableHealth, FakeBackend
 from tests.support.fake_session import FakeBotSession
 from tests.support.telegram import member_owner
 from tests.support.updates import (
@@ -50,6 +52,8 @@ class TestApp:
     engine: AsyncEngine
     clock: FakeClock
     backend: FakeBackend
+    backends: dict[str, FakeBackend]
+    laya_health: ControllableHealth
     i18n: I18nMiddleware
     notices: NoticeQueue
     _update_id: int = 0
@@ -72,6 +76,9 @@ async def build_app(
     *,
     prompt_delete_after_s: float = 600.0,
     backend: FakeBackend | None = None,
+    backends: dict[str, FakeBackend] | None = None,
+    laya_deployed: bool = True,
+    laya_healthy: bool = True,
     notices_per_second: float = 1,
     notices_per_minute: int = 18,
     max_queue_age_s: int = 300,
@@ -83,7 +90,17 @@ async def build_app(
     engine = create_async_engine(postgres_url)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     clock = FakeClock(FIXED_NOW)
-    classifier = backend if backend is not None else FakeBackend()
+    laya_health = ControllableHealth(deployed=laya_deployed, healthy=laya_healthy)
+    if backends is not None:
+        # The real BackendRouter over fakes as its two clients, so the tests
+        # exercise the production fallback decision (§5).
+        classifier: Any = BackendRouter(
+            laya=backends["laya"], jev=backends["jev"], health=laya_health
+        )
+        default_backend = backends["laya"]
+    else:
+        classifier = backend if backend is not None else FakeBackend()
+        default_backend = classifier
     # The queue's waiting moves the FakeClock, so the e2e tests see the
     # paced schedule the way production lives it — just instantly (§17).
     notice_queue = NoticeQueue(
@@ -101,6 +118,7 @@ async def build_app(
         # group prompt actually deletes inside the test.
         prompt_delete_after_s=prompt_delete_after_s,
         classifier=classifier,
+        models={"laya": "multilingual", "jev": "jev-1.13.0"},
         notices=notice_queue,
         # The default pace is one alert per second per Admin (§9); tests
         # must not wait on it.
@@ -116,7 +134,9 @@ async def build_app(
         session_maker=session_maker,
         engine=engine,
         clock=clock,
-        backend=classifier,
+        backend=default_backend,
+        backends=backends if backends is not None else {"laya": default_backend},
+        laya_health=laya_health,
         i18n=i18n,
         notices=notice_queue,
     )
@@ -142,6 +162,9 @@ async def app_fixture(
     *,
     prompt_delete_after_s: float = 600.0,
     backend: FakeBackend | None = None,
+    backends: dict[str, FakeBackend] | None = None,
+    laya_deployed: bool = True,
+    laya_healthy: bool = True,
     notices_per_second: float = 1,
     notices_per_minute: int = 18,
     max_queue_age_s: int = 300,
@@ -151,6 +174,9 @@ async def app_fixture(
         postgres_url,
         prompt_delete_after_s=prompt_delete_after_s,
         backend=backend,
+        backends=backends,
+        laya_deployed=laya_deployed,
+        laya_healthy=laya_healthy,
         notices_per_second=notices_per_second,
         notices_per_minute=notices_per_minute,
         max_queue_age_s=max_queue_age_s,

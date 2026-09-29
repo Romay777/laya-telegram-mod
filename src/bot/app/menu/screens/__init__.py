@@ -2,6 +2,7 @@
 
 from app.menu.screens import notice_template as notice_template_screens
 from app.menu.screens.add_chat import add_chat_screen
+from app.menu.screens.backend import backend_screen
 from app.menu.screens.categories import categories_screen
 from app.menu.screens.chat import chat_screen
 from app.menu.screens.chat_language import chat_language_screen
@@ -20,6 +21,7 @@ from app.menu.screens.settings import settings_screen
 
 __all__ = [
     "add_chat_screen",
+    "backend_screen",
     "categories_screen",
     "chat_language_screen",
     "chat_screen",

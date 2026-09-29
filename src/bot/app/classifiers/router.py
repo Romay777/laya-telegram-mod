@@ -23,12 +23,14 @@ itself touches no database and sends nothing (§5).
 """
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
-from app.classifiers.client import Probabilities, SystemOneError
-from app.classifiers.spec import QUESTION_SPEC
+from app.classifiers.client import Probabilities, SystemOneClient, SystemOneError
+from app.classifiers.health import LayaHealth
+from app.classifiers.spec import JEV_MODEL_DEFAULT, LAYA_MODEL, QUESTION_SPEC
 from app.domain.backends import JEV, LAYA, fallback_eligible
 
 
@@ -94,11 +96,27 @@ class BackendRouter:
         health: HealthProtocol | None = None,
         max_concurrency: int = 4,
         spec: dict[str, Any] | None = None,
+        models: Mapping[str, str] | None = None,
     ) -> None:
         self._clients: dict[str, SystemOneClient_ | None] = {LAYA: laya, JEV: jev}
         self._health = health
         self._spec = spec if spec is not None else QUESTION_SPEC
+        self._models: Mapping[str, str] = (
+            models if models is not None else {LAYA: LAYA_MODEL, JEV: JEV_MODEL_DEFAULT}
+        )
         self._semaphore = asyncio.Semaphore(max_concurrency)
+
+    def model_of(self, backend: str) -> str:
+        """The pinned model of one backend, as a `message_check` row records it (§12)."""
+        return self._models[backend]
+
+    async def aclose(self) -> None:
+        """Release the underlying HTTP clients (shutdown)."""
+        for client in self._clients.values():
+            if isinstance(client, SystemOneClient):
+                await client.aclose()
+        if isinstance(self._health, LayaHealth):
+            await self._health.aclose()
 
     async def check(self, backend: str, state: dict[str, Any]) -> BackendCheck:
         """One check for a chat's chosen backend (§5), never queued."""

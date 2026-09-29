@@ -1,14 +1,13 @@
-"""The Settings screen (§13): Mode, Categories, Sensitivity, Ladder, Chat Language, Notice Template.
+"""The Settings screen (§13): Mode, Categories, Backend, Sensitivity, Ladder, Language, Template.
 
 Every chat starts in Observation Mode; the Admin arms Auto-moderation here.
-The Classifier Backend arrives with its own ticket and is not shown before
-it exists.
 """
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.i18n import GetText
 from app.menu.callbacks import (
+    BackendCallback,
     CategoriesCallback,
     ChatCallback,
     ChatLanguageCallback,
@@ -37,6 +36,7 @@ def settings_screen(
             inline_keyboard=[
                 [mode_button(t, chat_id=chat_id, mode=mode)],
                 [categories_button(t, chat_id=chat_id)],
+                [backend_button(t, chat_id=chat_id)],
                 [sensitivity_button(t, chat_id=chat_id)],
                 [ladder_button(t, chat_id=chat_id)],
                 [chat_language_button(t, chat_id=chat_id)],
@@ -82,6 +82,14 @@ def categories_button(t: GetText, *, chat_id: int) -> InlineKeyboardButton:
     return InlineKeyboardButton(
         text=t("menu-chat-categories"),
         callback_data=CategoriesCallback(chat_id=chat_id).pack(),
+    )
+
+
+def backend_button(t: GetText, *, chat_id: int) -> InlineKeyboardButton:
+    """Classifier Backend (§5, §13): Laya or Jev for this chat."""
+    return InlineKeyboardButton(
+        text=t("menu-chat-backend-setting"),
+        callback_data=BackendCallback(chat_id=chat_id).pack(),
     )
 
 

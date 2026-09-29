@@ -18,9 +18,13 @@ def chat_screen(
     mode: str,
     backend: str,
     sensitivity: str,
+    backend_dead: bool = False,
 ) -> Screen:
     name = chat_title if chat_title else "—"
-    text = "\n".join([name, "", *status_lines(t, mode, backend, sensitivity)])
+    lines = status_lines(t, mode, backend, sensitivity)
+    if backend_dead:
+        lines.append(t("menu-chat-backend-never", backend=_BACKENDS.get(backend, backend)))
+    text = "\n".join([name, "", *lines])
     return Screen(
         text=text,
         reply_markup=InlineKeyboardMarkup(

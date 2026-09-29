@@ -82,6 +82,17 @@ class SensitivityCallback(CallbackData, prefix="chat-sensitivity"):
     level: str | None = None
 
 
+class BackendCallback(CallbackData, prefix="chat-backend"):
+    """The Classifier Backend screen (§5, §13) of one chat.
+
+    `name` is None when the screen is merely opened; otherwise it names the
+    backend the Admin just picked: `laya` or `jev`.
+    """
+
+    chat_id: int
+    name: str | None = None
+
+
 class ChatLanguageCallback(CallbackData, prefix="chat-language"):
     """The Chat Language screen (§15, §13) of one chat.
 

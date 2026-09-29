@@ -21,14 +21,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.alerts.fanout import AlertFanout
 from app.classifiers.client import Probabilities
-from app.classifiers.router import CheckSkip, ClassifierBackend
-from app.classifiers.spec import LAYA_MODEL, SPEC_VERSION
+from app.classifiers.router import BackendFailure, CheckSkip, ClassifierBackend
+from app.classifiers.spec import SPEC_VERSION
 from app.clock import Clock
 from app.db.models import Chat
 from app.db.repositories.chats import ChatRepository
+from app.db.repositories.incidents import IncidentRepository
 from app.db.repositories.moderation import ModerationRepository
 from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.suspicions import SuspicionRepository
+from app.domain.backends import BACKEND_NAMES
 from app.domain.decision import decide
 from app.linking.admin_cache import AdminCache
 from app.moderation import signals
@@ -36,13 +38,12 @@ from app.moderation.actions import delete_message, restrict_member
 from app.notices.jobs import violation_notice
 from app.notices.queue import NoticeQueue
 
-#: The backend this pipeline checks with: the local Laya (§5). Jev, the
-#: fallback router and its incidents are ticket #14.
-BACKEND = "laya"
-
 #: The §3 Sensitivity presets, keyed `[backend][sensitivity]`; each entry
 #: carries `.violation`. Any mapping shaped like `Settings.thresholds` fits.
 Thresholds = Mapping[str, Mapping[str, Any]]
+
+#: The model recorded per serving backend (§12): Laya pins its checkpoint.
+Models = Mapping[str, str]
 
 
 class ModerationPipeline:
@@ -53,6 +54,7 @@ class ModerationPipeline:
         core: BaseCore,
         backend: ClassifierBackend,
         thresholds: Thresholds,
+        models: Models,
         min_words: int,
         flagged_text_days: int,
         max_notice_lifetime_h: int,
@@ -64,12 +66,18 @@ class ModerationPipeline:
         self._core = core
         self._backend = backend
         self._thresholds = thresholds
+        self._models = models
         self._min_words = min_words
         self._flagged_text_days = flagged_text_days
         self._max_notice_lifetime_h = max_notice_lifetime_h
         self._fanout = fanout
         self._notices = notices
         self._session_maker = session_maker
+
+    @property
+    def backend(self) -> ClassifierBackend:
+        """The router behind this pipeline: its availability feeds the Menu (§5)."""
+        return self._backend
 
     async def handle_message(
         self,
@@ -113,39 +121,57 @@ class ModerationPipeline:
                 chat,
                 sender.id,
                 message.message_id,
+                backend=chat.backend,
                 outcome="skipped_short",
                 created_at=now,
             )
             return
 
-        # §4 steps 6-8: classify, then decide.
+        # §4 steps 6-8: classify with the chat's backend, then decide.
         started = time.monotonic()
-        outcome = await self._backend.check(signals.extract_state(text, entities))
+        check = await self._backend.check(chat.backend, signals.extract_state(text, entities))
         latency_ms = round((time.monotonic() - started) * 1000)
 
-        if isinstance(outcome, CheckSkip):
+        if check.failure is not None:
+            await self._note_failure(
+                bot, session, admin_cache, chat=chat, failure=check.failure, now=now
+            )
+
+        if isinstance(check.outcome, CheckSkip):
             await self._record(
-                repo, chat, sender.id, message.message_id, outcome=str(outcome), created_at=now
+                repo,
+                chat,
+                sender.id,
+                message.message_id,
+                backend=check.served_by,
+                outcome=str(check.outcome),
+                created_at=now,
             )
             return
 
+        # A served answer closes any open incident of the serving backend (§5).
+        await self._note_success(
+            bot, session, admin_cache, chat=chat, served_by=check.served_by, now=now
+        )
+
         decision = decide(
-            probabilities=outcome,
-            violation_threshold=self._violation_threshold(chat),
-            suspicion_threshold=self._suspicion_threshold(chat),
+            probabilities=check.outcome,
+            violation_threshold=self._violation_threshold(check.served_by, chat.sensitivity),
+            suspicion_threshold=self._suspicion_threshold(check.served_by, chat.sensitivity),
             mode=chat.mode,
             enabled_categories=await ChatRepository(session).enabled_categories(chat.chat_id),
         )
-        check = await self._record(
+        recorded = await self._record(
             repo,
             chat,
             sender.id,
             message.message_id,
+            backend=check.served_by,
             outcome=decision.outcome,
             created_at=now,
             category=decision.category,
             confidence=decision.confidence,
-            probabilities=dict(outcome),
+            probabilities=dict(check.outcome),
             latency_ms=latency_ms,
         )
         if decision.outcome == "suspicion":
@@ -156,7 +182,7 @@ class ModerationPipeline:
                 chat=chat,
                 sender=sender,
                 message_id=message.message_id,
-                check_id=check.id,
+                check_id=recorded.id,
                 text=text,
                 entities=entities,
                 category=decision.category,
@@ -170,7 +196,7 @@ class ModerationPipeline:
 
         # §4 step 9: the flagged message keeps its text until the retention passes.
         await repo.store_flagged(
-            check.id,
+            recorded.id,
             text=text,
             entities=entities,
             purge_at=now + timedelta(days=self._flagged_text_days),
@@ -181,7 +207,7 @@ class ModerationPipeline:
         violation = await repo.record_violation(
             chat=chat,
             user_id=sender.id,
-            check_id=check.id,
+            check_id=recorded.id,
             category=decision.category,
             now=now,
         )
@@ -244,6 +270,7 @@ class ModerationPipeline:
         user_id: int,
         message_id: int,
         *,
+        backend: str,
         outcome: str,
         created_at: datetime,
         category: str | None = None,
@@ -251,13 +278,17 @@ class ModerationPipeline:
         probabilities: Probabilities | None = None,
         latency_ms: int | None = None,
     ) -> Any:
-        """One `message_check` row: the Verdict and probabilities, no text (§12)."""
+        """One `message_check` row: the Verdict and probabilities, no text (§12).
+
+        The row names the backend that served the check — after a fallback
+        that is Laya, with Laya's model — never the chat's choice (§5).
+        """
         return await repo.record_check(
             chat_id=chat.chat_id,
             user_id=user_id,
             message_id=message_id,
-            backend=BACKEND,
-            model=LAYA_MODEL,
+            backend=backend,
+            model=self._models[backend],
             spec_version=SPEC_VERSION,
             outcome=outcome,
             created_at=created_at,
@@ -265,6 +296,67 @@ class ModerationPipeline:
             confidence=confidence,
             probabilities=probabilities,
             latency_ms=latency_ms,
+        )
+
+    async def _note_failure(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        admin_cache: AdminCache,
+        *,
+        chat: Chat,
+        failure: BackendFailure,
+        now: datetime,
+    ) -> None:
+        """The first failure opens the incident and alerts once (§5).
+
+        `open` returns the already-open incident unchanged while one is open
+        (a run of failures is one incident), so the alert goes out only when
+        this call actually created the row — a restart does not re-alert for
+        what is still open.
+        """
+        repo = IncidentRepository(session)
+        already_open = await repo.open_id(failure.backend) is not None
+        incident = await repo.open(failure.backend, reason=failure.reason, opened_at=now)
+        if already_open:
+            return
+        await self._fanout.backend_incident_alert(
+            bot,
+            session,
+            admin_cache=admin_cache,
+            chat=chat,
+            backend=BACKEND_NAMES[failure.backend],
+            reason=failure.reason,
+            incident_id=incident.id,
+        )
+
+    async def _note_success(
+        self,
+        bot: Bot,
+        session: AsyncSession,
+        admin_cache: AdminCache,
+        *,
+        chat: Chat,
+        served_by: str,
+        now: datetime,
+    ) -> None:
+        """The first success closes the serving backend's incident (§5).
+
+        The "back" follow-up goes to every chat that was told about it —
+        which may be more chats than this one.
+        """
+        repo = IncidentRepository(session)
+        open_id = await repo.open_id(served_by)
+        if open_id is None:
+            return
+        if not await repo.close(open_id, closed_at=now):
+            return
+        await self._fanout.backend_recovery_alerts(
+            bot,
+            session,
+            admin_cache=admin_cache,
+            incident_id=open_id,
+            backend=BACKEND_NAMES[served_by],
         )
 
     async def _raise_suspicion(
@@ -318,11 +410,14 @@ class ModerationPipeline:
             flagged_entities=entities,
         )
 
-    def _violation_threshold(self, chat: Chat) -> float:
-        """The chat's Sensitivity preset for its backend (§3; per-Category
-        overrides are reserved for later)."""
-        return self._thresholds[chat.backend][chat.sensitivity].violation
+    def _violation_threshold(self, backend: str, sensitivity: str) -> float:
+        """The Sensitivity preset for the backend that served the check (§3, §5).
 
-    def _suspicion_threshold(self, chat: Chat) -> float:
+        After a fallback that is Laya, with Laya's thresholds — never the
+        chat's choice. Per-Category overrides are reserved for later.
+        """
+        return self._thresholds[backend][sensitivity].violation
+
+    def _suspicion_threshold(self, backend: str, sensitivity: str) -> float:
         """The lower zone's threshold, from the same Sensitivity preset (§3)."""
-        return self._thresholds[chat.backend][chat.sensitivity].suspicion
+        return self._thresholds[backend][sensitivity].suspicion

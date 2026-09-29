@@ -21,6 +21,7 @@ from app.i18n import translator_for
 from app.menu.screen import Screen
 from app.menu.screens import (
     add_chat_screen,
+    backend_screen,
     categories_screen,
     chat_language_screen,
     chat_screen,
@@ -90,6 +91,7 @@ class MenuNavigator:
         backend: str,
         sensitivity: str,
         locale: str,
+        backend_dead: bool = False,
     ) -> None:
         await self._show(
             bot=bot,
@@ -102,6 +104,7 @@ class MenuNavigator:
                 mode=mode,
                 backend=backend,
                 sensitivity=sensitivity,
+                backend_dead=backend_dead,
             ),
         )
 
@@ -198,6 +201,34 @@ class MenuNavigator:
                 chat_title,
                 chat_id=chat_id,
                 sensitivity=sensitivity,
+            ),
+        )
+
+    async def show_backend(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        backend: str,
+        laya_deployed: bool,
+        jev_available: bool,
+        locale: str,
+    ) -> None:
+        """The chat's Classifier Backend (§5, §13); unavailable ones disabled."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=backend_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                backend=backend,
+                laya_deployed=laya_deployed,
+                jev_available=jev_available,
             ),
         )
 

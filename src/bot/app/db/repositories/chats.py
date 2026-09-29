@@ -112,6 +112,14 @@ class ChatRepository:
         chat.sensitivity = sensitivity
         await self.session.flush()
 
+    async def set_backend(self, chat_id: int, backend: str) -> None:
+        """The Classifier Backend this chat's checks go to (§5, §13)."""
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.backend = backend
+        await self.session.flush()
+
     async def set_chat_language(self, chat_id: int, chat_language: str) -> None:
         """The language of the chat's Notices, buttons and Member toasts (§15, §13)."""
         chat = await self.get(chat_id)

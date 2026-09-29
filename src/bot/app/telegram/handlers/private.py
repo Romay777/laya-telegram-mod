@@ -13,17 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.alerts import ALERT_MODES
 from app.alerts.fanout import APPEAL_MODES
+from app.classifiers.router import ClassifierBackend
 from app.clock import Clock
-from app.config import SENSITIVITIES
+from app.config import BACKENDS, SENSITIVITIES
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.domain import ladder_edits
+from app.domain.backends import never_available
 from app.i18n import SUPPORTED_LANGUAGES, translator_for
 from app.linking.admin_cache import AdminCache
 from app.linking.service import FallbackLinkStates, LinkingService
 from app.menu.callbacks import (
+    BackendCallback,
     CategoriesCallback,
     ChatCallback,
     ChatLanguageCallback,
@@ -187,6 +190,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         admin_cache: AdminCache,
         i18n: I18nContext,
         state: FSMContext,
+        classifier: ClassifierBackend | None = None,
     ) -> None:
         # Opening the Menu cancels a fallback Linking wait (§13).
         await state.clear()
@@ -197,17 +201,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
             return
 
-        await navigator.show_chat(
-            bot=bot,
-            session=session,
-            user=bot_user,
-            chat_id=chat.chat_id,
-            chat_title=chat.title,
-            mode=chat.mode,
-            backend=chat.backend,
-            sensitivity=chat.sensitivity,
-            locale=i18n.locale,
-        )
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier)
         await callback.answer()
 
     @router.callback_query(ChatSettingsCallback.filter(), F.message.chat.type == "private")
@@ -286,6 +280,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         admin_cache: AdminCache,
         i18n: I18nContext,
         state: FSMContext,
+        classifier: ClassifierBackend | None = None,
     ) -> None:
         """🟢 Enable auto-moderation now — after Linking or from the summary (§13)."""
         # Opening the Menu cancels a fallback Linking wait (§13).
@@ -298,7 +293,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
 
         chat.mode = "auto"  # idempotent: the summary button may be pressed late
         await session.flush()
-        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n)
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier)
         await callback.answer()
 
     @router.callback_query(ObserveCallback.filter(), F.message.chat.type == "private")
@@ -313,6 +308,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         clock: Clock,
         i18n: I18nContext,
         state: FSMContext,
+        classifier: ClassifierBackend | None = None,
     ) -> None:
         """🔵 Observe for 2 days first: schedule the one summary (§13, §11)."""
         # Opening the Menu cancels a fallback Linking wait (§13).
@@ -326,7 +322,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         chat.mode = "observation"
         chat.observation_summary_at = clock.now() + timedelta(hours=summary_after_h)
         await session.flush()
-        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n)
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier)
         await callback.answer()
 
     @router.callback_query(CategoriesCallback.filter(), F.message.chat.type == "private")
@@ -400,6 +396,53 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             chat_id=chat.chat_id,
             chat_title=chat.title,
             sensitivity=await _current_sensitivity(session, chat.chat_id),
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(BackendCallback.filter(), F.message.chat.type == "private")
+    async def backend(
+        callback: CallbackQuery,
+        callback_data: BackendCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+        classifier: ClassifierBackend,
+    ) -> None:
+        """Classifier Backend (§5, §13): Laya or Jev, unavailable ones disabled.
+
+        A `disabled` button still arrives when its keyboard was stale, so the
+        pick is refused server-side unless the backend can actually answer.
+        """
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        dead = never_available(
+            callback_data.name,
+            laya_deployed=classifier.laya_deployed,
+            jev_available=classifier.jev_available,
+        )
+        if callback_data.name in BACKENDS and not dead:
+            await ChatRepository(session).set_backend(chat.chat_id, callback_data.name)
+        chat = await ChatRepository(session).get(chat.chat_id) or chat
+        await navigator.show_backend(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            backend=chat.backend,
+            laya_deployed=classifier.laya_deployed,
+            jev_available=classifier.jev_available,
             locale=i18n.locale,
         )
         await callback.answer()
@@ -1000,8 +1043,18 @@ async def _show_chat_screen(
     bot_user: BotUser,
     chat: Chat,
     i18n: I18nContext,
+    classifier: ClassifierBackend | None = None,
 ) -> None:
-    """The chat's own status screen, after a choice has been made (§13)."""
+    """The chat's own status screen, after a choice has been made (§13).
+
+    With the router available, a chosen backend that can never answer in
+    this Instance says so on the status screen (§5).
+    """
+    backend_dead = classifier is not None and never_available(
+        chat.backend,
+        laya_deployed=classifier.laya_deployed,
+        jev_available=classifier.jev_available,
+    )
     await navigator.show_chat(
         bot=bot,
         session=session,
@@ -1012,6 +1065,7 @@ async def _show_chat_screen(
         backend=chat.backend,
         sensitivity=chat.sensitivity,
         locale=i18n.locale,
+        backend_dead=backend_dead,
     )
 
 
