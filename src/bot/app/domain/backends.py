@@ -16,10 +16,19 @@ BACKENDS: Final = ("laya", "jev")
 LAYA: Final = "laya"
 JEV: Final = "jev"
 
+#: The display names the Menu and the incident Admin Alerts use (§5, §9).
+BACKEND_NAMES: Final = {LAYA: "Laya", JEV: "Jev"}
+
 
 def other(backend: str) -> str:
     """The backend a failing check falls back to — Jev and Laya pair up."""
     return JEV if backend == LAYA else LAYA
+
+
+def linking_default(*, laya_deployed: bool) -> str:
+    """The `backend` a freshly Linked Chat starts with (§12): `laya` if Laya
+    is deployed, otherwise `jev`."""
+    return LAYA if laya_deployed else JEV
 
 
 def jev_available(api_key: str | None) -> bool:

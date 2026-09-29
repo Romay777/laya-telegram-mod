@@ -9,12 +9,14 @@ DB, no I/O.
 
 import pytest
 from app.domain.backends import (
+    BACKEND_NAMES,
     BACKENDS,
     JEV,
     LAYA,
     fallback_eligible,
     jev_available,
     laya_available,
+    linking_default,
     never_available,
     other,
 )
@@ -29,6 +31,15 @@ def test_the_two_backends_are_laya_and_jev() -> None:
 def test_other_pairs_each_backend_with_its_fallback() -> None:
     assert other("jev") == "laya"
     assert other("laya") == "jev"
+
+
+def test_backend_names_are_the_display_names_of_the_incident_alerts() -> None:
+    assert BACKEND_NAMES == {"laya": "Laya", "jev": "Jev"}
+
+
+def test_the_linking_default_is_laya_only_while_it_is_deployed() -> None:
+    assert linking_default(laya_deployed=True) == "laya"
+    assert linking_default(laya_deployed=False) == "jev"
 
 
 def test_jev_is_available_exactly_when_a_key_is_set() -> None:
