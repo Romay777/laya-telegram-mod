@@ -142,9 +142,11 @@ class ModerationPipeline:
                 return  # an anonymous admin speaks as the chat itself (§4 step 1)
             if message.sender_chat.id == await self._linked_channel_id(bot, chat):
                 return  # a post from the chat's own linked channel (§4 step 1)
-        if sender is None or sender.is_bot:
-            return
-        if await admin_cache.is_admin(bot, chat.chat_id, sender.id):
+            # Any other sender_chat is a foreign channel: it is checked like
+            # any other message (§4), attributed to the channel itself.
+        elif sender is None or sender.is_bot:
+            return  # no sender at all, or a bot (§4 step 1)
+        if sender is not None and await admin_cache.is_admin(bot, chat.chat_id, sender.id):
             return
 
         # §4 step 2: edits to messages older than 48 hours are skipped —

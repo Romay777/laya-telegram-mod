@@ -13,6 +13,7 @@ from typing import Any
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
     AnswerCallbackQuery,
+    BanChatSenderChat,
     DeleteMessage,
     EditMessageReplyMarkup,
     EditMessageText,
@@ -20,6 +21,7 @@ from aiogram.methods import (
     GetUpdates,
     RestrictChatMember,
     SendMessage,
+    UnbanChatSenderChat,
 )
 from aiogram.methods.base import TelegramMethod
 from aiogram.types import Chat, Message, User
@@ -94,7 +96,7 @@ class FakeBotSession(BaseSession):
             method, EditMessageText | EditMessageReplyMarkup | DeleteMessage | AnswerCallbackQuery
         ):
             return True
-        if isinstance(method, RestrictChatMember):
+        if isinstance(method, RestrictChatMember | BanChatSenderChat | UnbanChatSenderChat):
             return True
         if isinstance(method, GetMe):
             return User(

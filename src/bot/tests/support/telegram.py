@@ -55,14 +55,20 @@ def chat_facts(
     chat_type: str,
     title: str | None = None,
     permissions: ChatPermissions | None = None,
+    linked_chat_id: int | None = None,
 ) -> ChatFullInfo:
-    """A `getChat` answer: what the Check-again re-check needs to know."""
+    """A `getChat` answer: what the Check-again re-check needs to know.
+
+    `linked_chat_id` is the discussion channel Telegram ties to a supergroup;
+    the §4 pipeline asks for it to recognise the linked channel's posts.
+    """
     return ChatFullInfo(
         id=chat_id,
         type=chat_type,
         title=title,
         accent_color_id=0,
         max_reaction_count=0,
+        linked_chat_id=linked_chat_id,
         accepted_gift_types=AcceptedGiftTypes(
             unlimited_gifts=False,
             limited_gifts=False,
