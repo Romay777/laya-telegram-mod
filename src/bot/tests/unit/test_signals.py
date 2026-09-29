@@ -46,3 +46,15 @@ def test_is_short_follows_min_words_and_the_link_exception() -> None:
     assert not is_short(text="hi there friends", entities=[], min_words=3)
     # Short, but the invite link keeps it in the pipeline (§4 step 4).
     assert not is_short(text="join t.me/+abc", entities=[], min_words=3)
+
+
+def test_an_invite_link_is_detected_in_text_and_in_text_link_targets() -> None:
+    from app.moderation.signals import has_invite_link
+
+    assert has_invite_link("join https://t.me/+abc123", [])
+    assert has_invite_link("https://t.me/joinchat/AAAA", [])
+    assert has_invite_link(
+        "come", [{"type": "text_link", "offset": 0, "length": 4, "url": "https://t.me/+xyz"}]
+    )
+    assert not has_invite_link("a plain https://example.com", [])
+    assert not has_invite_link("https://t.me/durov", [])  # a public profile link is not an invite

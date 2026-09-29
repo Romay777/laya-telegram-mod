@@ -52,6 +52,22 @@ def has_link_invite_or_mention(text: str, entities: list[dict[str, Any]]) -> boo
     return False
 
 
+def has_invite_link(text: str, entities: list[dict[str, Any]]) -> bool:
+    """The §3 invite-link signal: `t.me/+…` or `t.me/joinchat/…` anywhere.
+
+    The text is searched directly, and so is every `text_link` target: an
+    invite hidden behind labelled text is still an invite (§3).
+    """
+    if _INVITE.search(text):
+        return True
+    return any(
+        entity.get("type") in _LINK_ENTITY_TYPES
+        and entity.get("url")
+        and _INVITE.search(entity["url"])
+        for entity in entities
+    )
+
+
 def is_short(*, text: str, entities: list[dict[str, Any]], min_words: int) -> bool:
     """The §4 step 4 skip: under `min_words` words and link-free."""
     return word_count(text) < min_words and not has_link_invite_or_mention(text, entities)
