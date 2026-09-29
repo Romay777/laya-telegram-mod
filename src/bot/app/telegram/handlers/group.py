@@ -7,7 +7,7 @@ once (§4 step 1).
 """
 
 from aiogram import Bot, F, Router
-from aiogram.types import Message
+from aiogram.types import ChatMemberUpdated, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories.chats import ChatRepository
@@ -61,16 +61,9 @@ def create_group_router() -> Router:
 
     @router.chat_member()
     async def chat_member_changed(
-        event: object,
-        bot: Bot,
-        admin_cache: AdminCache,
-        session: AsyncSession,
+        event: ChatMemberUpdated, bot: Bot, admin_cache: AdminCache
     ) -> None:
         """A membership changed: the cached admin list is invalidated (§4 step 1)."""
-        chat_id = getattr(getattr(event, "chat", None), "id", None)
-        new_member = getattr(event, "new_chat_member", None)
-        user_id = getattr(getattr(new_member, "user", None), "id", None)
-        if chat_id is not None and user_id is not None:
-            admin_cache.invalidate(chat_id, user_id)
+        admin_cache.invalidate(event.chat.id, event.new_chat_member.user.id)
 
     return router

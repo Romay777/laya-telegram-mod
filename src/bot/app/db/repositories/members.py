@@ -7,7 +7,6 @@ its counters move with every check.
 
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Member
@@ -65,8 +64,3 @@ class MemberRepository:
             member.flagged_count += 1
         await self.session.flush()
         return member.first_seen_at
-
-    async def known_ids(self, chat_id: int) -> set[int]:
-        """The users with a Member row in one chat (not used by v1 checks)."""
-        rows = await self.session.scalars(select(Member.user_id).where(Member.chat_id == chat_id))
-        return set(rows)
