@@ -143,7 +143,7 @@ async def test_an_open_suspicion_is_not_alerted_again_on_edit(
     await app.feed(
         group_message_update(chat_id, member_id, SPAM_TEXT, message_id=102, sender_name="Sneaky")
     )
-    (alert,) = app.session.calls_of("SendMessage")
+    (_alert,) = app.session.calls_of("SendMessage")
     app.session.calls.clear()
     async with app.session_maker() as db:
         (suspicion,) = (await db.execute(select(Suspicion))).scalars().all()
