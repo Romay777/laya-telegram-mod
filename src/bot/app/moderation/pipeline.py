@@ -231,8 +231,9 @@ class ModerationPipeline:
             violation_threshold=self._violation_threshold(check.served_by, chat.sensitivity),
             suspicion_threshold=self._suspicion_threshold(check.served_by, chat.sensitivity),
             shifts=threshold_shifts(
-                is_new_member=facts is not None
-                and is_new(
+                # No row at all is the newest kind of Member: first contact.
+                is_new_member=facts is None
+                or is_new(
                     first_seen_at=facts.first_seen_at,
                     checked_count=facts.checked_count,
                     now=now,

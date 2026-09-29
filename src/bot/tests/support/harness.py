@@ -83,6 +83,7 @@ async def build_app(
     notices_per_minute: int = 18,
     max_queue_age_s: int = 300,
     notices_gate: asyncio.Event | None = None,
+    shifts: dict[str, float] | None = None,
 ) -> TestApp:
     i18n = build_i18n_middleware()
     await i18n.core.startup()  # the Dispatcher's startup hook does this in production
@@ -123,6 +124,7 @@ async def build_app(
         # The default pace is one alert per second per Admin (§9); tests
         # must not wait on it.
         alerts_pace_s=0.0,
+        shifts=shifts,
     )
 
     session = FakeBotSession()
@@ -169,6 +171,7 @@ async def app_fixture(
     notices_per_minute: int = 18,
     max_queue_age_s: int = 300,
     notices_gate: asyncio.Event | None = None,
+    shifts: dict[str, float] | None = None,
 ) -> AsyncIterator[TestApp]:
     app = await build_app(
         postgres_url,
@@ -181,6 +184,7 @@ async def app_fixture(
         notices_per_minute=notices_per_minute,
         max_queue_age_s=max_queue_age_s,
         notices_gate=notices_gate,
+        shifts=shifts,
     )
     try:
         yield app
