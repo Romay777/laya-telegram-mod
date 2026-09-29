@@ -92,6 +92,9 @@ class MenuNavigator:
         sensitivity: str,
         locale: str,
         backend_dead: bool = False,
+        status: str = "active",
+        missing_rights: Sequence[str] = (),
+        removed_days_left: int | None = None,
     ) -> None:
         await self._show(
             bot=bot,
@@ -105,6 +108,9 @@ class MenuNavigator:
                 backend=backend,
                 sensitivity=sensitivity,
                 backend_dead=backend_dead,
+                status=status,
+                missing_rights=tuple(missing_rights),
+                removed_days_left=removed_days_left,
             ),
         )
 

@@ -55,16 +55,24 @@ def create_linking_router() -> Router:
         bot_user: BotUser,
         navigator: MenuNavigator,
         linking: LinkingService,
+        lifecycle: ChatLifecycleService,
         i18n: I18nContext,
     ) -> None:
-        await linking.check_again(
-            bot=bot,
-            session=session,
-            navigator=navigator,
-            user=bot_user,
-            chat_id=callback_data.chat_id,
-            locale=i18n.locale,
-        )
+        # The same 🔵 Check again serves two screens (§10): the Linking
+        # failure screen (no Linked Chat row yet) and a Suspended Chat's
+        # alert or Chat screen — where the re-check reactivates.
+        chat = await ChatRepository(session).get(callback_data.chat_id)
+        if chat is not None and chat.status == "suspended":
+            await recheck_suspended(bot, session, lifecycle, navigator, bot_user, chat, i18n)
+        else:
+            await linking.check_again(
+                bot=bot,
+                session=session,
+                navigator=navigator,
+                user=bot_user,
+                chat_id=callback_data.chat_id,
+                locale=i18n.locale,
+            )
         await callback.answer()
 
     @router.callback_query(FallbackCheckCallback.filter(), F.message.chat.type == "private")
@@ -76,17 +84,76 @@ def create_linking_router() -> Router:
         bot_user: BotUser,
         navigator: MenuNavigator,
         linking: LinkingService,
+        lifecycle: ChatLifecycleService,
         i18n: I18nContext,
     ) -> None:
-        # The fallback path has no one-hour token: the checks alone decide (§10).
-        await linking.fallback_check_again(
-            bot=bot,
-            session=session,
-            navigator=navigator,
-            user=bot_user,
-            chat_id=callback_data.chat_id,
-            locale=i18n.locale,
-        )
+        # The fallback path has no one-hour token: the checks alone decide
+        # (§10). A Suspended Chat re-checks through the lifecycle service.
+        chat = await ChatRepository(session).get(callback_data.chat_id)
+        if chat is not None and chat.status == "suspended":
+            await recheck_suspended(bot, session, lifecycle, navigator, bot_user, chat, i18n)
+        else:
+            await linking.fallback_check_again(
+                bot=bot,
+                session=session,
+                navigator=navigator,
+                user=bot_user,
+                chat_id=callback_data.chat_id,
+                locale=i18n.locale,
+            )
         await callback.answer()
 
     return router
+
+
+async def recheck_suspended(
+    bot: Bot,
+    session: AsyncSession,
+    lifecycle: ChatLifecycleService,
+    navigator: MenuNavigator,
+    bot_user: BotUser,
+    chat: BotUser | None,
+    i18n: I18nContext,
+) -> None:
+    """🔵 Check again on a Suspended Chat: re-read the rights live (§10).
+
+    Rights back: the chat turns `active`, the Linker is told, and the
+    presser lands on the Chat screen. Still missing: the screen says so
+    with what is gone. Removed or unlinked meanwhile: Home takes over.
+    """
+    outcome = await lifecycle.check_again(bot, session, chat_id=chat.chat_id)
+    await session.refresh(chat)
+    if outcome.unknown_chat or chat.status == "removed":
+        await navigator.show_home(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            locale=i18n.locale,
+            chats=await _home_chats(session, chat.chat_id, bot_user),
+        )
+        return
+    await navigator.show_chat(
+        bot=bot,
+        session=session,
+        user=bot_user,
+        chat_id=chat.chat_id,
+        chat_title=chat.title,
+        mode=chat.mode,
+        backend=chat.backend,
+        sensitivity=chat.sensitivity,
+        locale=i18n.locale,
+        status=chat.status,
+        missing_rights=outcome.missing_rights,
+    )
+
+
+async def _home_chats(
+    session: AsyncSession, exclude_chat_id: int, bot_user: BotUser
+) -> list[tuple[int, str | None]]:
+    """Home without the chat that just proved unreachable (§13)."""
+    chats = await ChatRepository(session).list_linked()
+    return [
+        (row.chat_id, row.title)
+        for row in chats
+        if row.chat_id != exclude_chat_id and row.linker_id == bot_user.user_id
+    ]

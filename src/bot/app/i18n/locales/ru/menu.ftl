@@ -83,3 +83,5 @@ chat-status-suspended = приостановлен
 menu-chat-suspended = ⚠️ Приостановлен — проверки на паузе. Нет прав: {$rights}
 menu-chat-removed = ⛔ Удалён — настройки хранятся ещё {$days} дн.
 menu-chat-check-again = 🔵 Проверить снова
+menu-chat-lifecycle = Статус: {$status}
+chat-status-removed = удалён

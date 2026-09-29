@@ -4,6 +4,7 @@ from datetime import timedelta
 from typing import cast
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -22,6 +23,8 @@ from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.domain import ladder_edits
 from app.domain.backends import never_available
+from app.domain.lifecycle import rights_missing
+from app.domain.linking import REQUIRED_RIGHTS
 from app.i18n import SUPPORTED_LANGUAGES, translator_for
 from app.linking.admin_cache import AdminCache
 from app.linking.service import FallbackLinkStates, LinkingService
@@ -190,6 +193,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         admin_cache: AdminCache,
         i18n: I18nContext,
         state: FSMContext,
+        clock: Clock,
         classifier: ClassifierBackend | None = None,
     ) -> None:
         # Opening the Menu cancels a fallback Linking wait (§13).
@@ -201,7 +205,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
             return
 
-        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier)
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier, clock)
         await callback.answer()
 
     @router.callback_query(ChatSettingsCallback.filter(), F.message.chat.type == "private")
@@ -280,6 +284,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         admin_cache: AdminCache,
         i18n: I18nContext,
         state: FSMContext,
+        clock: Clock,
         classifier: ClassifierBackend | None = None,
     ) -> None:
         """🟢 Enable auto-moderation now — after Linking or from the summary (§13)."""
@@ -293,7 +298,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
 
         chat.mode = "auto"  # idempotent: the summary button may be pressed late
         await session.flush()
-        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier)
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier, clock)
         await callback.answer()
 
     @router.callback_query(ObserveCallback.filter(), F.message.chat.type == "private")
@@ -322,7 +327,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         chat.mode = "observation"
         chat.observation_summary_at = clock.now() + timedelta(hours=summary_after_h)
         await session.flush()
-        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier)
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, classifier, clock)
         await callback.answer()
 
     @router.callback_query(CategoriesCallback.filter(), F.message.chat.type == "private")
@@ -968,6 +973,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         admin_cache: AdminCache,
         i18n: I18nContext,
         state: FSMContext,
+        clock: Clock,
     ) -> None:
         """Open journal, from a burst summary (§9).
 
@@ -982,7 +988,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
             return
 
-        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n)
+        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, clock=clock)
         await callback.answer()
 
     @router.message(StateFilter(FallbackLinkStates.waiting_for_chat), F.chat.type == "private")
@@ -1044,17 +1050,41 @@ async def _show_chat_screen(
     chat: Chat,
     i18n: I18nContext,
     classifier: ClassifierBackend | None = None,
+    clock: Clock | None = None,
+    removed_chat_days: int = 30,
 ) -> None:
     """The chat's own status screen, after a choice has been made (§13).
 
     With the router available, a chosen backend that can never answer in
-    this Instance says so on the status screen (§5).
+    this Instance says so on the status screen (§5). The lifecycle status
+    shows here too (§10): a Suspended Chat names the rights it is missing,
+    read live from the bot's own membership; a Removed Chat counts the
+    days its settings are still kept.
     """
     backend_dead = classifier is not None and never_available(
         chat.backend,
         laya_deployed=classifier.laya_deployed,
         jev_available=classifier.jev_available,
     )
+    missing_rights: tuple[str, ...] = ()
+    removed_days_left: int | None = None
+    if chat.status == "suspended":
+        try:
+            bot_member = await bot.get_chat_member(chat.chat_id, bot.id)
+        except TelegramAPIError:
+            bot_member = None
+        missing_rights = (
+            rights_missing(
+                status=bot_member.status,
+                can_delete_messages=bool(getattr(bot_member, "can_delete_messages", False)),
+                can_restrict_members=bool(getattr(bot_member, "can_restrict_members", False)),
+            )
+            if bot_member is not None
+            else REQUIRED_RIGHTS
+        )
+    elif chat.status == "removed" and chat.removed_at is not None and clock is not None:
+        days_left = (chat.removed_at + timedelta(days=removed_chat_days) - clock.now()).days
+        removed_days_left = max(days_left, 0)
     await navigator.show_chat(
         bot=bot,
         session=session,
@@ -1066,6 +1096,9 @@ async def _show_chat_screen(
         sensitivity=chat.sensitivity,
         locale=i18n.locale,
         backend_dead=backend_dead,
+        status=chat.status,
+        missing_rights=missing_rights,
+        removed_days_left=removed_days_left,
     )
 
 

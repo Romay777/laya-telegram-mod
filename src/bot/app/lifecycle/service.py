@@ -36,6 +36,7 @@ class CheckOutcome:
     suspended: bool = False  # still missing rights
     removed: bool = False  # removed already, or the bot can no longer see the chat
     unknown_chat: bool = False  # no Linked Chat row answers to this id
+    missing_rights: tuple[str, ...] = ()  # what is still missing when suspended
 
 
 class ChatLifecycleService:
@@ -83,9 +84,7 @@ class ChatLifecycleService:
         elif outcome.action is LifecycleAction.REMOVE:
             await self._remove(bot, session, chat)
 
-    async def check_again(
-        self, bot: Bot, session: AsyncSession, *, chat_id: int
-    ) -> CheckOutcome:
+    async def check_again(self, bot: Bot, session: AsyncSession, *, chat_id: int) -> CheckOutcome:
         """🔵 Check again on a Suspension alert or the Chat screen (§10).
 
         The bot's own membership is read live; rights back means `active`
@@ -113,7 +112,7 @@ class ChatLifecycleService:
         )
         if missing:
             await self._suspend(bot, session, chat, missing)
-            return CheckOutcome(suspended=True)
+            return CheckOutcome(suspended=True, missing_rights=missing)
 
         if chat.status == "suspended":
             await self._reactivate(bot, session, chat)
@@ -171,9 +170,7 @@ class ChatLifecycleService:
         )
 
     async def _remove(self, bot: Bot, session: AsyncSession, chat: Chat) -> None:
-        await ChatRepository(session).mark_removed(
-            chat.chat_id, removed_at=self._clock.now()
-        )
+        await ChatRepository(session).mark_removed(chat.chat_id, removed_at=self._clock.now())
         await self._fanout.removal_alert(
             bot,
             session,

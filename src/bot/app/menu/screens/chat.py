@@ -1,11 +1,16 @@
-"""The Chat screen (§13): what was linked and with what — mode, backend, Sensitivity."""
+"""The Chat screen (§13): what was linked and with what — mode, backend, Sensitivity.
+
+The lifecycle status lives here too (§10): a Suspended Chat is shown with
+the rights it is missing and a 🔵 Check again button; a Removed Chat shows
+how long its settings are still kept.
+"""
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.i18n import GetText
-from app.menu.callbacks import ChatSettingsCallback, MenuAction
+from app.menu.callbacks import ChatSettingsCallback, LinkCheckCallback, MenuAction
 from app.menu.screen import Screen
-from app.menu.screens.buttons import button
+from app.menu.screens.buttons import PRIMARY, button
 
 _BACKENDS = {"laya": "Laya", "jev": "Jev"}
 
@@ -18,27 +23,48 @@ def chat_screen(
     mode: str,
     backend: str,
     sensitivity: str,
+    status: str = "active",
+    missing_rights: tuple[str, ...] = (),
+    removed_days_left: int | None = None,
     backend_dead: bool = False,
 ) -> Screen:
     name = chat_title if chat_title else "—"
-    lines = status_lines(t, mode, backend, sensitivity)
+    lines = [t("menu-chat-lifecycle", status=t(f"chat-status-{status}"))]
+    if status == "suspended":
+        lines.append(
+            t(
+                "menu-chat-suspended",
+                rights=", ".join(t(f"menu-right-{right}") for right in missing_rights),
+            )
+        )
+    if status == "removed" and removed_days_left is not None:
+        lines.append(t("menu-chat-removed", days=removed_days_left))
+    lines.append("")
+    lines += status_lines(t, mode, backend, sensitivity)
     if backend_dead:
         lines.append(t("menu-chat-backend-never", backend=_BACKENDS.get(backend, backend)))
-    text = "\n".join([name, "", *lines])
-    return Screen(
-        text=text,
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [button(t, "menu-back", MenuAction.HOME)],
-                [
-                    InlineKeyboardButton(
-                        text=t("menu-chat-settings"),
-                        callback_data=ChatSettingsCallback(chat_id=chat_id).pack(),
-                    )
-                ],
-            ]
-        ),
+    text = "\n".join([name, *lines])
+    rows = [[button(t, "menu-back", MenuAction.HOME)]]
+    if status == "suspended":
+        rows.insert(
+            0,
+            [
+                InlineKeyboardButton(
+                    text=t("menu-chat-check-again"),
+                    callback_data=LinkCheckCallback(chat_id=chat_id).pack(),
+                    style=PRIMARY,  # the way out of the suspended state
+                )
+            ],
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=t("menu-chat-settings"),
+                callback_data=ChatSettingsCallback(chat_id=chat_id).pack(),
+            )
+        ]
     )
+    return Screen(text=text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 def status_lines(t: GetText, mode: str, backend: str, sensitivity: str) -> list[str]:

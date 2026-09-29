@@ -84,3 +84,5 @@ chat-status-suspended = suspended
 menu-chat-suspended = ⚠️ Suspended — checks are paused. Missing: {$rights}
 menu-chat-removed = ⛔ Removed — settings are kept for {$days} more days.
 menu-chat-check-again = 🔵 Check again
+menu-chat-lifecycle = Status: {$status}
+chat-status-removed = removed

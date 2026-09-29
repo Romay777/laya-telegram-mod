@@ -406,9 +406,7 @@ class ModerationPipeline:
             violation_id=violation.id,
         )
 
-    async def _suspend_chat(
-        self, bot: Bot, session: AsyncSession, chat: Chat
-    ) -> None:
+    async def _suspend_chat(self, bot: Bot, session: AsyncSession, chat: Chat) -> None:
         """The chat just lost its rights mid-Violation: suspend (§10).
 
         The Violation is already durable — the Restriction is Telegram's

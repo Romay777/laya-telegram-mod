@@ -35,9 +35,7 @@ def upgrade() -> None:
         ["id"],
         ondelete="CASCADE",
     )
-    op.alter_column(
-        "admin_alert", "subject_id", existing_type=sa.Integer(), type_=sa.BigInteger()
-    )
+    op.alter_column("admin_alert", "subject_id", existing_type=sa.Integer(), type_=sa.BigInteger())
     op.create_index(
         "ix_chat_removed_at",
         "chat",
@@ -48,9 +46,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_chat_removed_at", table_name="chat")
-    op.alter_column(
-        "admin_alert", "subject_id", existing_type=sa.BigInteger(), type_=sa.Integer()
-    )
+    op.alter_column("admin_alert", "subject_id", existing_type=sa.BigInteger(), type_=sa.Integer())
     op.drop_constraint("violation_check_id_fkey", "violation", type_="foreignkey")
     op.create_foreign_key(
         "violation_check_id_fkey", "violation", "message_check", ["check_id"], ["id"]

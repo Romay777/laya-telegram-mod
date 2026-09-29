@@ -49,7 +49,7 @@ def test_bot_removed_or_banned_removes_the_chat_whatever_stood_before() -> None:
     for new_status in ("left", "kicked"):
         outcome = lifecycle_outcome(
             was_active=True,
-                new_status=new_status,
+            new_status=new_status,
             can_delete_messages=True,
             can_restrict_members=True,
         )

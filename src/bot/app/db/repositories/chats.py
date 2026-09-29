@@ -193,9 +193,7 @@ class ChatRepository:
         chat.removed_at = removed_at
         await self.session.flush()
 
-    async def due_removed_chats(
-        self, now: datetime, *, removed_chat_days: int
-    ) -> list[Chat]:
+    async def due_removed_chats(self, now: datetime, *, removed_chat_days: int) -> list[Chat]:
         """Removed Chats whose retention has run out (§11): the purge job's input."""
         horizon = now - timedelta(days=removed_chat_days)
         rows = await self.session.scalars(

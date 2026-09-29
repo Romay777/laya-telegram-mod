@@ -424,3 +424,87 @@ async def test_the_scheduler_purges_the_chat_after_the_window(
     async with app.session_maker() as db:
         members = (await db.execute(select(Member))).scalars().all()
     assert members == []
+
+
+# --- The Chat screen and 🔵 Check again (§10, §13) ----------------------------
+
+
+async def suspended_chat(app: TestApp, admin_id: int, chat_id: int) -> int:
+    """Link, suspend, and return the suspension alert's message id."""
+    await linked_via_deeplink(app, admin_id, chat_id)
+    app.session.calls.clear()
+    await suspend(app, admin_id, chat_id, can_delete_messages=True)
+    # The suspension fan-out answered from the warm cache, so its scripted
+    # admin answer is still queued; it must not leak into the next call.
+    app.session.drop_scripted(GetChatMember)
+    (alert_call,) = [
+        call for call in app.session.calls_of("SendMessage") if call.method.chat_id == admin_id
+    ]
+    return alert_call.result.message_id
+
+
+async def test_the_chat_screen_shows_the_suspended_state_and_missing_right(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    menu = await suspended_chat(app, admin_id, chat_id)
+    app.session.calls.clear()
+
+    # The Linker opens the chat from Home; the Linker's own cached admin
+    # answer covers the access check, and the bot's membership is read live
+    # to name what is missing (§10, §13).
+    app.session.script(GetChatMember, member_administrator(BOT_USER, can_restrict_members=False))
+    await app.feed(private_callback_update(admin_id, f"chat:{chat_id}", menu, language_code="en"))
+
+    (edit,) = app.session.calls_of("EditMessageText")
+    assert "suspended" in edit.method.text
+    assert "restrict members" in edit.method.text
+    buttons = [button for row in edit.method.reply_markup.inline_keyboard for button in row]
+    assert any(
+        button.callback_data == f"link-check:{chat_id}" and button.text == "🔵 Check again"
+        for button in buttons
+    )
+
+
+async def test_check_again_with_rights_back_reactivates_and_tells_the_linker(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    alert_message_id = await suspended_chat(app, admin_id, chat_id)
+    app.session.calls.clear()
+
+    # The rights came back; the press re-checks the bot's membership live.
+    app.session.script(GetChatMember, member_administrator(BOT_USER))
+    await app.feed(
+        private_callback_update(
+            admin_id, f"link-check:{chat_id}", alert_message_id, language_code="en"
+        )
+    )
+
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.status == "active"
+
+    # The Linker is notified: the suspension copy now shows the all-clear.
+    # The Menu message is edited to the Chat screen besides the alert copy.
+    edits = app.session.calls_of("EditMessageText")
+    assert any("active again" in edit.method.text for edit in edits)
+
+
+async def test_check_again_while_still_suspended_shows_the_screen(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    alert_message_id = await suspended_chat(app, admin_id, chat_id)
+    app.session.calls.clear()
+
+    # The right is still gone: the Chat screen says so.
+    app.session.script(GetChatMember, member_administrator(BOT_USER, can_restrict_members=False))
+    await app.feed(
+        private_callback_update(
+            admin_id, f"link-check:{chat_id}", alert_message_id, language_code="en"
+        )
+    )
+
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.status == "suspended"
+
+    (edit,) = app.session.calls_of("EditMessageText")
+    assert "suspended" in edit.method.text
+    assert "restrict members" in edit.method.text
