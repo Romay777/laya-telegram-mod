@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import User
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -29,6 +29,7 @@ from app.db.repositories.moderation import ModerationRepository
 from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.suspicions import SuspicionRepository
 from app.i18n import translator_for
+from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
 from app.moderation.actions import restrict_member
 from app.notices.jobs import violation_notice
@@ -63,6 +64,7 @@ async def decide_suspicion(
     max_notice_lifetime_h: int,
     notices: NoticeQueue,
     session_maker: async_sessionmaker[AsyncSession],
+    lifecycle: ChatLifecycleService | None = None,
 ) -> SuspicionDecision:
     """Apply one decision press on a Suspicion alert copy (§9)."""
     repo = SuspicionRepository(session)
@@ -88,6 +90,7 @@ async def decide_suspicion(
             max_notice_lifetime_h=max_notice_lifetime_h,
             notices=notices,
             session_maker=session_maker,
+            lifecycle=lifecycle,
         )
 
     t = translator_for(core, locale)
@@ -129,8 +132,13 @@ async def _apply_punishment(
     max_notice_lifetime_h: int,
     notices: NoticeQueue,
     session_maker: async_sessionmaker[AsyncSession],
+    lifecycle: ChatLifecycleService | None = None,
 ) -> bool:
-    """The full Violation (§6, §9); returns whether the message was deleted."""
+    """The full Violation (§6, §9); returns whether the message was deleted.
+
+    A restriction that fails for lack of rights suspends the chat (§10),
+    exactly as the pipeline's own Violation path does.
+    """
     now = clock.now()
     too_old = now - suspicion.created_at > DELETION_WINDOW
 
@@ -151,9 +159,23 @@ async def _apply_punishment(
         now=now,
         source="admin",
     )
-    await restrict_member(
-        bot, chat.chat_id, suspicion.user_id, restricted_until=violation.restricted_until
-    )
+    try:
+        await restrict_member(
+            bot, chat.chat_id, suspicion.user_id, restricted_until=violation.restricted_until
+        )
+    except TelegramForbiddenError:
+        # §10: the chat lost a needed right — suspend; the Violation stands.
+        await session.commit()
+        if lifecycle is not None:
+            await lifecycle.suspend_on_failed_restriction(bot, session, chat)
+        return False
+    except TelegramBadRequest as failure:
+        if "not enough rights" not in str(failure):
+            raise
+        await session.commit()
+        if lifecycle is not None:
+            await lifecycle.suspend_on_failed_restriction(bot, session, chat)
+        return False
     # The Violation becomes durable before anything background refers to it:
     # the queue's drain posts the notice from its own session, which cannot
     # see this request's uncommitted transaction.

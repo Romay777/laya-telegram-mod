@@ -17,6 +17,7 @@ from app.alerts.unban import unban_channel
 from app.clock import Clock
 from app.db.repositories.chats import ChatRepository
 from app.i18n import translator_for
+from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
 from app.menu.callbacks import (
     LiftRestrictionCallback,
@@ -109,6 +110,7 @@ def create_alerts_router(max_notice_lifetime_h: int = DEFAULT_MAX_LIFETIME_H) ->
         fanout: AlertFanout,
         notices: NoticeQueue,
         i18n: I18nContext,
+        lifecycle: ChatLifecycleService,
     ) -> None:
         """🔴 Punish / Dismiss on a Suspicion alert copy; first click wins (§9)."""
         # Every chat-scoped callback re-checks Admin access (§13).
@@ -138,6 +140,7 @@ def create_alerts_router(max_notice_lifetime_h: int = DEFAULT_MAX_LIFETIME_H) ->
             max_notice_lifetime_h=max_notice_lifetime_h,
             notices=notices,
             session_maker=session_maker,
+            lifecycle=lifecycle,
         )
         if decision.won:
             await callback.answer()
