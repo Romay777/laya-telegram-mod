@@ -58,6 +58,7 @@ src/
         sender.py             # per-chat rate-limited Chat Notice queue
       alerts/                 # Admin Alert fan-out, first-click-wins, cross-editing
       linking/                # Linking flow, rights checks, admin-status cache
+      lifecycle/              # Chat lifecycle: Suspended and Removed chats (§10)
       menu/
         navigator.py          # renders a screen into the single Menu message
         callbacks.py          # CallbackData factories
