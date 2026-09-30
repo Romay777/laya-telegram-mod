@@ -31,9 +31,8 @@ def journal_screen(
         lines.append(t("menu-journal-page", page=page + 1, total=pages))
     else:
         lines.append(t("menu-journal-empty"))
-    rows = [
-        [_entry_button(t, chat_id=chat_id, entry=entry, page=page) for entry in entries],
-    ]
+    # One Violation per row, the way Home lists its chats (§13).
+    rows = [[_entry_button(t, chat_id=chat_id, entry=entry, page=page)] for entry in entries]
     if pages > 1:
         rows.append(_pager_row(t, chat_id=chat_id, page=page, pages=pages))
     rows.append(
@@ -54,7 +53,7 @@ def _entry_button(
         text=t(
             "menu-journal-entry",
             category=t(f"category-{entry.category}"),
-            when=_when(entry.created_at),
+            when=when_text(entry.created_at),
         ),
         callback_data=ViolationCardCallback(
             chat_id=chat_id, violation_id=entry.violation_id, page=page
@@ -78,6 +77,6 @@ def _pager_row(t: GetText, *, chat_id: int, page: int, pages: int) -> list[Inlin
     ]
 
 
-def _when(moment: datetime) -> str:
-    """The moment a Violation happened, as the Journal entries show it."""
+def when_text(moment: datetime) -> str:
+    """The moment a Violation happened, as the Journal and the card show it."""
     return moment.strftime("%Y-%m-%d %H:%M")

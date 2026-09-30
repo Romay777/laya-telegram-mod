@@ -14,6 +14,7 @@ from app.i18n import GetText
 from app.menu.callbacks import JournalCallback, LiftRestrictionCallback
 from app.menu.screen import Screen
 from app.menu.screens.buttons import SUCCESS
+from app.menu.screens.journal import when_text
 from app.notices.durations import duration_text
 
 #: The card's state names, in the Admin's language (§13).
@@ -44,7 +45,7 @@ def violation_card_screen(
     if card.step_seconds is not None:  # a sender-chat ban took no Step (§4)
         lines.append(t("alert-violation-step", duration=duration_text(t, card.step_seconds)))
     lines += [
-        t("menu-card-when", when=_when(card.created_at)),
+        t("menu-card-when", when=when_text(card.created_at)),
         t("menu-card-state", state=t(_STATE_KEYS.get(card.state, card.state))),
     ]
     text, entities = quoted_alert(t, "\n".join(lines), card.flagged_text, card.flagged_entities)
@@ -79,8 +80,3 @@ def _lift_button(t: GetText, *, chat_id: int, card: ViolationCard) -> InlineKeyb
         style=SUCCESS,
         disabled=DisabledButton() if card.state == "false_positive" else None,
     )
-
-
-def _when(moment) -> str:
-    """The moment the Violation happened, as the card shows it."""
-    return moment.strftime("%Y-%m-%d %H:%M")
