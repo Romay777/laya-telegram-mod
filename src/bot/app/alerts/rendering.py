@@ -14,6 +14,7 @@ from app.notices.durations import duration_text
 
 __all__ = [
     "message_link",
+    "quoted_alert",
     "render_appeal_alert",
     "render_channel_alert",
     "render_incident_alert",
@@ -33,7 +34,7 @@ def message_link(chat_id: int, message_id: int) -> str:
     return f"https://t.me/c/{str(chat_id).removeprefix('-100')}/{message_id}"
 
 
-def _quoted_alert(
+def quoted_alert(
     t: GetText,
     header: str,
     flagged_text: str | None,
@@ -101,7 +102,7 @@ def render_violation_alert(
         confidence=confidence,
         step_seconds=step_seconds,
     )
-    return _quoted_alert(t, header, flagged_text, flagged_entities)
+    return quoted_alert(t, header, flagged_text, flagged_entities)
 
 
 def render_suspicion_alert(
@@ -136,7 +137,7 @@ def render_suspicion_alert(
         "length": utf16_len(url),
         "url": url,
     }
-    return _quoted_alert(t, header, flagged_text, flagged_entities, header_entities=[link])
+    return quoted_alert(t, header, flagged_text, flagged_entities, header_entities=[link])
 
 
 def render_channel_alert(
@@ -165,7 +166,7 @@ def render_channel_alert(
             ),
         ]
     )
-    return _quoted_alert(t, header, flagged_text, flagged_entities)
+    return quoted_alert(t, header, flagged_text, flagged_entities)
 
 
 def render_incident_alert(
@@ -221,7 +222,7 @@ def render_appeal_alert(
             t("alert-appeal-line"),
         ]
     )
-    return _quoted_alert(t, header, flagged_text, flagged_entities)
+    return quoted_alert(t, header, flagged_text, flagged_entities)
 
 
 def render_lifecycle_alert(

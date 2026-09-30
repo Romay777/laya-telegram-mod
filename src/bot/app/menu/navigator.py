@@ -11,10 +11,12 @@ from collections.abc import Sequence
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import MessageEntity
 from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser
+from app.db.repositories.journal import ChatStatistics, JournalEntry, ViolationCard
 from app.domain.linking import LinkingProblems
 from app.domain.template import Validation
 from app.i18n import translator_for
@@ -28,6 +30,7 @@ from app.menu.screens import (
     enter_chat_screen,
     home_screen,
     how_it_works_screen,
+    journal_screen,
     ladder_screen,
     ladder_step_screen,
     language_screen,
@@ -38,6 +41,8 @@ from app.menu.screens import (
     notice_template_screens,
     sensitivity_screen,
     settings_screen,
+    statistics_screen,
+    violation_card_screen,
 )
 from app.menu.screens.home import ChatSummary
 
@@ -492,6 +497,86 @@ class MenuNavigator:
             screen=link_expired_screen(translator_for(self.core, locale)),
         )
 
+    async def show_statistics(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        stats: ChatStatistics,
+        days: int,
+        locale: str,
+    ) -> None:
+        """Statistics of one chat (§13): the counts for the last 7 or 30 days."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=statistics_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                stats=stats,
+                days=days,
+            ),
+        )
+
+    async def show_journal(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        entries: Sequence[JournalEntry],
+        total: int,
+        page: int,
+        locale: str,
+    ) -> None:
+        """The Journal of one chat (§13): Violations newest first, 5 per page."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=journal_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                entries=list(entries),
+                total=total,
+                page=page,
+            ),
+        )
+
+    async def show_violation_card(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        card: ViolationCard,
+        page: int,
+        locale: str,
+    ) -> None:
+        """One Journal entry opened (§13): the Violation's card."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=violation_card_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                card=card,
+                page=page,
+            ),
+        )
+
     async def _show(
         self, *, bot: Bot, session: AsyncSession, user: BotUser, screen: Screen
     ) -> None:
@@ -502,6 +587,7 @@ class MenuNavigator:
                     chat_id=user.user_id,
                     message_id=user.menu_message_id,
                     text=screen.text,
+                    entities=_entities_of(screen),
                     reply_markup=screen.reply_markup,
                 )
                 return
@@ -517,6 +603,7 @@ class MenuNavigator:
         sent = await bot.send_message(
             chat_id=user.user_id,
             text=screen.text,
+            entities=_entities_of(screen),
             reply_markup=screen.reply_markup,
         )
         user.menu_message_id = sent.message_id
@@ -526,3 +613,10 @@ class MenuNavigator:
         # Already gone; removing the old message is best effort.
         with contextlib.suppress(TelegramBadRequest):
             await bot.delete_message(chat_id=user.user_id, message_id=stale_message_id)
+
+
+def _entities_of(screen: Screen) -> list[MessageEntity] | None:
+    """The screen's entities as Telegram wants them, or None when it has none."""
+    if not screen.entities:
+        return None
+    return [MessageEntity.model_validate(entity) for entity in screen.entities]

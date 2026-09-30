@@ -254,11 +254,36 @@ class SuspicionDecideCallback(CallbackData, prefix="suspicion-decide"):
 
 
 class JournalCallback(CallbackData, prefix="journal"):
-    """Open journal, the button on a burst summary (§9) and, later, the Chat
-    screen (§13). Carries the `chat_id` so the handler can re-check Admin
-    access (§13)."""
+    """The Journal screen (§13), from the burst summary or the Chat screen.
+
+    Carries the `chat_id` so the handler can re-check Admin access (§13);
+    `page` is the page shown, 0 for the newest five.
+    """
 
     chat_id: int
+    page: int = 0
+
+
+class StatisticsCallback(CallbackData, prefix="chat-statistics"):
+    """The Statistics screen (§13) of one chat.
+
+    `days` is None when the screen is merely opened; otherwise it is the
+    window the Admin just picked: 7 or 30.
+    """
+
+    chat_id: int
+    days: int | None = None
+
+
+class ViolationCardCallback(CallbackData, prefix="violation-card"):
+    """One Journal entry opened (§13): the Violation's card.
+
+    `page` is the Journal page the entry came from, so Back returns there.
+    """
+
+    chat_id: int
+    violation_id: int
+    page: int = 0
 
 
 class UnbanChannelCallback(CallbackData, prefix="unban-channel"):
