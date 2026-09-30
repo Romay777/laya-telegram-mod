@@ -4,15 +4,20 @@ Both Violation producers — the moderation pipeline (§4) and a punished
 Suspicion (§9) — hand the queue the same shaped job. The chat's Notice
 Template (§14) is read by the producer, before enqueueing, so the drain
 posts the notice without a DB stop first. `send` posts the notice in the
-Chat Language and records it with its removal time; `on_dropped` marks the
-Violation `notice_dropped` — no Appeal is possible (§7) — and appends
-"notice not sent (rate limit)" to every copy of its Violation Admin Alert.
+Chat Language and records it with its removal time; `on_dropped` runs only
+when the notice never went out: it marks the Violation `notice_dropped` —
+no Appeal is possible (§7) — and appends "notice not sent (rate limit)" to
+every copy of its Violation Admin Alert.
 """
 
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import Bot
 from aiogram_i18n.cores.base import BaseCore
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.alerts.fanout import AlertFanout
@@ -21,6 +26,16 @@ from app.db.models import Chat, Violation
 from app.db.repositories.moderation import ModerationRepository
 from app.notices.queue import PendingNotice
 from app.notices.sender import removal_time, send_notice
+
+#: The record of a posted notice is retried this many times before it is
+#: given up as lost bookkeeping (§7): the notice is already out, so a
+#: record failure is never a drop — at worst it is logged.
+RECORD_ATTEMPTS = 3
+
+#: Seconds between the record retries: short, because the drain waits.
+RECORD_BACKOFF_S = (0.5, 2.0)
+
+logger = logging.getLogger(__name__)
 
 
 def violation_notice(
@@ -42,6 +57,7 @@ def violation_notice(
     appeal_violation_id: int | None,
     template_text: str | None = None,
     template_entities: list[dict[str, Any]] | None = None,
+    record_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> PendingNotice:
     """The queue's job for one Violation's Chat Notice, enqueued now (§7).
 
@@ -53,37 +69,57 @@ def violation_notice(
     """
 
     async def send() -> None:
-        async with session_maker() as session:
-            notice = await send_notice(
-                bot,
-                core,
-                chat_id=chat.chat_id,
-                chat_language=chat.chat_language,
-                name=member_name,
-                member_id=member_id,
-                category=category,
-                step_seconds=violation.restriction_seconds or 0,
-                # {strike} is N/M (§14): the Violation being announced counts,
-                # capped at the ladder length once the last Step repeats —
-                # which is exactly the recorded Step's position + 1.
-                strike=violation.step_index + 1,
-                ladder_len=len(chat.ladder),
-                template_text=template_text,
-                template_entities=template_entities,
-                appeal_violation_id=appeal_violation_id,
-            )
-            await ModerationRepository(session).save_notice(
-                violation.id,
-                message_id=notice.message_id,
-                # The removal timers start at posting (§7): a forever
-                # Restriction's notice lives `max_lifetime_h` from here.
-                delete_at=removal_time(
-                    clock.now(),
-                    restricted_until=violation.restricted_until,
-                    max_lifetime_h=max_lifetime_h,
-                ),
-            )
-            await session.commit()
+        # The post comes first, and its Telegram errors travel to the
+        # queue: a notice Telegram refuses is genuinely dropped (§7). The
+        # record afterwards is the job's own business — the notice is
+        # already out, so a DB failure here must never become a drop.
+        notice = await send_notice(
+            bot,
+            core,
+            chat_id=chat.chat_id,
+            chat_language=chat.chat_language,
+            name=member_name,
+            member_id=member_id,
+            category=category,
+            step_seconds=violation.restriction_seconds or 0,
+            # {strike} is N/M (§14): the Violation being announced counts,
+            # capped at the ladder length once the last Step repeats —
+            # which is exactly the recorded Step's position + 1.
+            strike=violation.step_index + 1,
+            ladder_len=len(chat.ladder),
+            template_text=template_text,
+            template_entities=template_entities,
+            appeal_violation_id=appeal_violation_id,
+        )
+        await _record(notice.message_id)
+
+    async def _record(message_id: int) -> None:
+        for attempt in range(RECORD_ATTEMPTS):
+            try:
+                async with session_maker() as session:
+                    await ModerationRepository(session).save_notice(
+                        violation.id,
+                        message_id=message_id,
+                        # The removal timers start at posting (§7): a forever
+                        # Restriction's notice lives `max_lifetime_h` from here.
+                        delete_at=removal_time(
+                            clock.now(),
+                            restricted_until=violation.restricted_until,
+                            max_lifetime_h=max_lifetime_h,
+                        ),
+                    )
+                    await session.commit()
+                return
+            except SQLAlchemyError:
+                if attempt == RECORD_ATTEMPTS - 1:
+                    logger.error(
+                        "notice for violation %s posted but never recorded: "
+                        "the scheduler will not remove it (§7)",
+                        violation.id,
+                        exc_info=True,
+                    )
+                else:
+                    await record_sleep(RECORD_BACKOFF_S[attempt])
 
     async def on_dropped() -> None:
         async with session_maker() as session:

@@ -7,7 +7,8 @@ at either end of the pager and on a lifted card's button.
 
 from datetime import UTC, datetime, timedelta
 
-from app.db.repositories.journal import ChatStatistics, JournalEntry, ViolationCard
+from app.db.repositories.journal import JournalEntry, ViolationCard
+from app.db.repositories.statistics import ChatStatistics
 from app.i18n import translator_for
 from app.menu.screens.chat import chat_screen
 from app.menu.screens.journal import journal_screen
@@ -51,7 +52,7 @@ async def test_the_statistics_screen_shows_the_counts_and_marks_the_window() -> 
     assert "Advertising: 1" in screen.text
     assert "Suspicions: 2" in screen.text
     assert "Appeals: 1" in screen.text
-    assert "False positives: 1" in screen.text
+    assert "False Positives: 1" in screen.text
 
     buttons = by_text(screen)
     assert buttons["Last 7 days"].style == "primary"  # the window shown
@@ -161,7 +162,7 @@ async def test_the_card_shows_the_facts_the_state_and_the_quote() -> None:
     assert "Advertising" in screen.text
     assert "97%" in screen.text
     assert "1 hour" in screen.text
-    assert "2025-12-31 22:00" in screen.text  # when it happened
+    assert "2025-12-31 22:00 UTC" in screen.text  # when it happened, labelled UTC
     assert "Active" in screen.text
     assert screen.text.endswith("Buy my product")  # the quoted text
     kinds = [entity["type"] for entity in screen.entities]
@@ -169,7 +170,7 @@ async def test_the_card_shows_the_facts_the_state_and_the_quote() -> None:
 
     buttons = by_text(screen)
     lift = buttons["🟢 Lift restriction"]
-    assert lift.callback_data == "lift:-100200:3"
+    assert lift.callback_data == "lift:-100200:3:1"  # the page rides along (§13)
     assert lift.style == "success"
     assert lift.disabled is None  # an Active Violation can be lifted
     assert buttons["Back"].callback_data == "journal:-100200:1"  # the page it came from

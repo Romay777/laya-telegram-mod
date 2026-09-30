@@ -28,6 +28,7 @@ from app.db.repositories.alerts import AlertRepository
 from app.db.repositories.moderation import ModerationRepository
 from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.suspicions import SuspicionRepository
+from app.domain.guards import belongs_to_chat
 from app.i18n import translator_for
 from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
@@ -69,7 +70,7 @@ async def decide_suspicion(
     """Apply one decision press on a Suspicion alert copy (§9)."""
     repo = SuspicionRepository(session)
     suspicion = await repo.get(suspicion_id)
-    if suspicion is None or suspicion.chat_id != chat.chat_id:
+    if not belongs_to_chat(suspicion, chat.chat_id):
         # Nothing to decide — or callback data forged for another chat (§13).
         return SuspicionDecision(won=False, decided_by="?")
 

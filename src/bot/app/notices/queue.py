@@ -3,11 +3,12 @@
 Each chat has an in-memory FIFO drained by a sender task. The drain paces
 itself through `domain.rate_limit` — at most `per_second` messages per
 second and `per_minute` per rolling minute — sleeps out a Telegram
-`retry_after` on a 429 and retries the same notice, drops any notice that
-sat in the queue longer than `max_queue_age_s`, and drops a notice Telegram
-refuses outright (or whose bookkeeping fails) — telling its producer so the
-Violation can be marked `notice_dropped` (§7). One failed notice never ends
-the drain: the notices behind it go out all the same.
+`retry_after` on a 429 and retries the same notice, and drops a notice
+that sat in the queue longer than `max_queue_age_s` or that Telegram
+refuses outright — telling its producer so the Violation can be marked
+`notice_dropped` (§7). A notice that went out but failed to record is the
+job's own business and never a drop. One failed notice never ends the
+drain: the notices behind it go out all the same.
 
 What sending and dropping *mean* is the producer's business: every
 `PendingNotice` carries its own `send` and `on_dropped` callables. The
@@ -42,8 +43,9 @@ class PendingNotice:
     """One Chat Notice waiting for its slot: what to do, and since when.
 
     `send` posts the notice and records it; it may raise
-    `TelegramRetryAfter`, which only delays it. `on_dropped` runs when the
-    notice aged out of the queue instead — the Violation's business (§7).
+    `TelegramRetryAfter`, which only delays it, or `TelegramAPIError`,
+    which drops it (§7). `on_dropped` runs when the notice aged out of the
+    queue instead — the Violation's business (§7).
     """
 
     chat_id: int
@@ -128,11 +130,12 @@ class NoticeQueue:
                 pending.appendleft(notice)
                 await self._sleep(float(retry.retry_after))
                 continue
-            except (TelegramAPIError, SQLAlchemyError):
-                # Telegram refused the notice (the bot was kicked, say), or
-                # its bookkeeping failed: drop it like a stale one and go on —
-                # one failed notice never ends the drain (§7). Anything else
-                # stays an error: a bug in the queue's own work must be loud.
+            except TelegramAPIError:
+                # Telegram refused the notice (the bot was kicked, say): drop
+                # it like a stale one and go on — one failed notice never
+                # ends the drain (§7). A failure after the notice went out is
+                # the job's own business, never a drop. Anything else stays
+                # an error: a bug in the queue's own work must be loud.
                 logger.warning("notice for chat %s failed to send; dropped", chat_id, exc_info=True)
                 await self._drop(chat_id, notice)
                 continue

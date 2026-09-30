@@ -126,6 +126,18 @@ _Avoid_: notice (that word means Chat Notice), notification
 The single interface message in an Admin's private chat with the bot. It is edited in place to move between screens.
 _Avoid_: panel, dashboard
 
+**Journal**:
+The Menu's list of a chat's Violations, newest first, five to a page. Each entry opens the Violation card.
+_Avoid_: log, history
+
+**Statistics**:
+The Menu's counts of one chat's checks, Violations, Suspicions, Appeals and False Positives over the last 7 or 30 days.
+_Avoid_: analytics, metrics
+
+**Violation card**:
+A Journal entry opened: the Violation with its Category, confidence, Step, moment and current state, quoting the flagged message while the retention keeps it. Its Lift restriction is the Admin Alert action itself.
+_Avoid_: details, profile
+
 **Appeal**:
 A Member's request to lift a Restriction. The Member files it with the "It's a mistake" button on the Chat Notice, and can file one per Violation. The deleted message stays deleted whatever the outcome.
 _Avoid_: complaint, report, dispute

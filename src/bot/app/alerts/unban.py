@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.alerts.lift import handle_of
 from app.db.models import Violation
 from app.db.repositories.alerts import AlertRepository
+from app.domain.guards import belongs_to_chat
 from app.i18n import translator_for
 from app.moderation.actions import unban_sender_chat
 
@@ -33,7 +34,7 @@ async def unban_channel(
 ) -> None:
     """Apply one 🟢 Unban press (§4): lift the ban, tell every copy."""
     violation = await session.get(Violation, violation_id)
-    if violation is None or violation.chat_id != chat_id:
+    if not belongs_to_chat(violation, chat_id):
         # Nothing to unban — or callback data forged for another chat (§13).
         return
     await unban_sender_chat(bot, chat_id, violation.user_id)

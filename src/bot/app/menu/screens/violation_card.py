@@ -10,6 +10,7 @@ from aiogram.types import DisabledButton, InlineKeyboardButton, InlineKeyboardMa
 
 from app.alerts.rendering import quoted_alert
 from app.db.repositories.journal import ViolationCard
+from app.domain.ladder import ViolationState
 from app.i18n import GetText
 from app.menu.callbacks import JournalCallback, LiftRestrictionCallback
 from app.menu.screen import Screen
@@ -19,9 +20,9 @@ from app.notices.durations import duration_text
 
 #: The card's state names, in the Admin's language (§13).
 _STATE_KEYS = {
-    "active": "menu-card-state-active",
-    "expired": "menu-card-state-expired",
-    "false_positive": "menu-card-state-false-positive",
+    ViolationState.ACTIVE: "menu-card-state-active",
+    ViolationState.EXPIRED: "menu-card-state-expired",
+    ViolationState.FALSE_POSITIVE: "menu-card-state-false-positive",
 }
 
 
@@ -53,7 +54,7 @@ def violation_card_screen(
         text=text,
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [_lift_button(t, chat_id=chat_id, card=card)],
+                [_lift_button(t, chat_id=chat_id, card=card, page=page)],
                 [
                     InlineKeyboardButton(
                         text=t("menu-back"),
@@ -66,17 +67,20 @@ def violation_card_screen(
     )
 
 
-def _lift_button(t: GetText, *, chat_id: int, card: ViolationCard) -> InlineKeyboardButton:
+def _lift_button(
+    t: GetText, *, chat_id: int, card: ViolationCard, page: int
+) -> InlineKeyboardButton:
     """🟢 Lift restriction, the Admin Alert action (§9); gone means disabled.
 
     A False Positive was already lifted — first click wins (§9) — so the
-    button stays visible but does nothing.
+    button stays visible but does nothing. The page rides along so the
+    re-rendered card's Back returns to it (§13).
     """
     return InlineKeyboardButton(
         text=t("alert-lift-button"),
         callback_data=LiftRestrictionCallback(
-            chat_id=chat_id, violation_id=card.violation_id
+            chat_id=chat_id, violation_id=card.violation_id, page=page
         ).pack(),
         style=SUCCESS,
-        disabled=DisabledButton() if card.state == "false_positive" else None,
+        disabled=DisabledButton() if card.state == ViolationState.FALSE_POSITIVE else None,
     )

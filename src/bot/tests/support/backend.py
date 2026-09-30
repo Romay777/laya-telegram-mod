@@ -13,6 +13,7 @@ from typing import Any
 
 from app.classifiers.client import Probabilities, SystemOneError
 from app.classifiers.router import BackendCheck, CheckSkip
+from app.classifiers.spec import JEV_MODEL_DEFAULT, LAYA_MODEL
 
 #: The probabilities of an ordinary, boring message.
 CLEAN = Probabilities({"spam": 0.02, "ads": 0.03, "insult": 0.01, "clean": 0.94})
@@ -52,6 +53,9 @@ class FakeBackend:
         self.laya_deployed = True
         self.laya_healthy = True
         self.jev_available = True
+        #: The pinned models the wiring records on `message_check` rows (§12):
+        #: the spec defaults, like a BackendRouter built without its own.
+        self.models = {"laya": LAYA_MODEL, "jev": JEV_MODEL_DEFAULT}
 
     def script(self, outcome: Probabilities | CheckSkip) -> None:
         """Script what the next checks return until told otherwise."""

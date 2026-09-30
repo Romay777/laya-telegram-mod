@@ -78,5 +78,9 @@ def _pager_row(t: GetText, *, chat_id: int, page: int, pages: int) -> list[Inlin
 
 
 def when_text(moment: datetime) -> str:
-    """The moment a Violation happened, as the Journal and the card show it."""
-    return moment.strftime("%Y-%m-%d %H:%M")
+    """The moment a Violation happened, as the Journal and the card show it.
+
+    The rows store UTC (§12); the label says so, since the Admin's own
+    clock may not.
+    """
+    return f"{moment:%Y-%m-%d %H:%M} UTC"

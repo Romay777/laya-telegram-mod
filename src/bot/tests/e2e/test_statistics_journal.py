@@ -118,7 +118,7 @@ async def test_statistics_shows_the_seeded_counts_and_the_toggle_switches_window
     assert "Spam: 1" in (edit.text or "")
     assert "Suspicions: 0" in (edit.text or "")
     assert "Appeals: 0" in (edit.text or "")
-    assert "False positives: 0" in (edit.text or "")
+    assert "False Positives: 0" in (edit.text or "")
     buttons = {button.text: button for button in all_buttons(edit)}
     assert buttons["Last 7 days"].style == "primary"  # the window shown
     assert buttons["Last 30 days"].style is None
@@ -235,6 +235,45 @@ async def test_a_card_opens_from_the_journal_and_lifting_updates_it(
     async with app.session_maker() as db:
         revoked = (await db.get(Violation, violation.id)).revoked_at
     assert revoked is not None
+
+
+async def test_a_card_keeps_its_journal_page_through_a_lift(
+    app: TestApp, admin_id: int, chat_id: int
+) -> None:
+    menu = await auto_moderation_chat(app, admin_id, chat_id)
+    app.backend.script(SPAMMY)
+    for offset in range(6):  # six Members, six Violations: two Journal pages
+        await seed_violation(app, chat_id, next(_member_ids), message_id=81 + offset)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+
+    # Open the Journal's second page and one card from it (§13).
+    await app.feed(
+        private_callback_update(admin_id, f"journal:{chat_id}:1", menu, language_code="en")
+    )
+    (journal_edit,) = app.session.calls_of("EditMessageText")
+    (entry,) = [
+        button
+        for button in all_buttons(journal_edit.method)
+        if (button.callback_data or "").startswith("violation-card:")
+    ]
+    assert entry.callback_data.endswith(":1")  # opened from page 1
+    app.session.calls.clear()
+
+    await app.feed(private_callback_update(admin_id, entry.callback_data, menu, language_code="en"))
+    card = app.session.calls_of("EditMessageText")[-1].method
+    lift = card_lift(card)
+    assert lift.callback_data == f"lift:{chat_id}:{entry.callback_data.split(':')[2]}:1"
+    app.session.script(GetChat, chat_facts(chat_id, "supergroup", permissions=DEFAULT_PERMISSIONS))
+    app.session.calls.clear()
+
+    # The lift re-renders the card on the page it came from (§13).
+    await app.feed(private_callback_update(admin_id, lift.callback_data, menu, language_code="en"))
+    edits = app.session.calls_of("EditMessageText")
+    card = edits[-1].method
+    assert "False Positive" in (card.text or "")
+    assert f"journal:{chat_id}:1" in [
+        button.callback_data for button in all_buttons(card)
+    ]  # Back returns to page 1, not the first page
 
 
 async def test_a_card_whose_text_was_purged_says_so(

@@ -6,7 +6,7 @@ Category, Suspicions, Appeals, False Positives — with the window toggle.
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.db.repositories.journal import ChatStatistics
+from app.db.repositories.statistics import ChatStatistics
 from app.i18n import GetText
 from app.menu.callbacks import ChatCallback, StatisticsCallback
 from app.menu.screen import Screen

@@ -6,6 +6,7 @@ is forever. No Telegram, no DB, no I/O.
 """
 
 from datetime import datetime, timedelta
+from enum import StrEnum
 
 #: Telegram treats Restriction durations below 30 s or above 366 days as
 #: forever (§6), so the bot sends those as `until_date = 0` too.
@@ -34,17 +35,25 @@ def restricted_until(now: datetime, step_seconds: int) -> datetime | None:
     return now + timedelta(seconds=step_seconds)
 
 
+class ViolationState(StrEnum):
+    """The state of a Violation at a moment (§6), as the card shows it (§13)."""
+
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    FALSE_POSITIVE = "false_positive"
+
+
 def violation_state(
     *, revoked_at: datetime | None, expires_at: datetime | None, now: datetime
-) -> str:
-    """The state of a Violation at `now` (§6): `active`, `expired` or `false_positive`.
+) -> ViolationState:
+    """The state of a Violation at `now` (§6).
 
     A revoked Violation is a False Positive whatever its Expiry; an unrevoked
     one stops being Active at its Expiry moment, the same boundary
     `count_active` draws.
     """
     if revoked_at is not None:
-        return "false_positive"
+        return ViolationState.FALSE_POSITIVE
     if expires_at is not None and expires_at <= now:
-        return "expired"
-    return "active"
+        return ViolationState.EXPIRED
+    return ViolationState.ACTIVE

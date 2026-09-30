@@ -16,6 +16,7 @@ from app.db.repositories.appeals import AppealRepository
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.journal import JournalRepository
 from app.db.repositories.moderation import ModerationRepository
+from app.db.repositories.statistics import StatisticsRepository
 from app.db.repositories.suspicions import SuspicionRepository
 from app.domain.ladder import violation_state
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,7 +133,7 @@ async def test_statistics_counts_seed_data_across_both_windows(
     await seed.check("clean", at=timedelta(days=40))
     await seed.violation(at=timedelta(days=41), category="spam")
 
-    repo = JournalRepository(db_session)
+    repo = StatisticsRepository(db_session)
     week = await repo.statistics(chat.chat_id, since=clock.now() - timedelta(days=7))
     month = await repo.statistics(chat.chat_id, since=clock.now() - timedelta(days=30))
 
@@ -147,6 +148,29 @@ async def test_statistics_counts_seed_data_across_both_windows(
     assert month.suspicions == 3
     assert month.appeals == 2
     assert month.false_positives == 1
+
+
+async def test_a_false_positive_counts_when_it_was_revoked(
+    db_session: AsyncSession,
+) -> None:
+    clock = FakeClock()
+    chat = await a_chat(db_session, clock)
+    seed = Seeder(db_session, chat, clock)
+    await seed.violation(at=timedelta(days=40), category="spam")
+    lifted_today = await seed.violation(at=timedelta(days=20), category="spam")
+    await seed.repo.revoke_violation(lifted_today.id, by=77, at=clock.now())
+
+    repo = StatisticsRepository(db_session)
+    week = await repo.statistics(chat.chat_id, since=clock.now() - timedelta(days=7))
+    month = await repo.statistics(chat.chat_id, since=clock.now() - timedelta(days=30))
+
+    # The lift is when the False Positive happened: a Violation lifted today
+    # counts today, whatever its age — while the 40-day-old Violation, never
+    # lifted, shows up in neither window's False Positives (§13).
+    assert week.false_positives == 1
+    assert month.false_positives == 1
+    assert week.violations_by_category == {}
+    assert month.violations_by_category == {"spam": 1}  # still counted by created_at
 
 
 async def test_the_journal_lists_violations_newest_first_five_per_page(

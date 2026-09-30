@@ -16,7 +16,8 @@ from aiogram_i18n.cores.base import BaseCore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotUser
-from app.db.repositories.journal import ChatStatistics, JournalEntry, ViolationCard
+from app.db.repositories.journal import JournalEntry, ViolationCard
+from app.db.repositories.statistics import ChatStatistics
 from app.domain.linking import LinkingProblems
 from app.domain.template import Validation
 from app.i18n import translator_for

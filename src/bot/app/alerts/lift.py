@@ -21,6 +21,7 @@ from app.clock import Clock
 from app.db.models import Violation
 from app.db.repositories.alerts import AlertRepository
 from app.db.repositories.moderation import ModerationRepository
+from app.domain.guards import belongs_to_chat
 from app.i18n import translator_for
 from app.moderation.actions import lift_restriction
 
@@ -70,7 +71,7 @@ async def lift_violation(
     the earlier winner otherwise — for the handler's toasts and edits.
     """
     violation = await session.get(Violation, violation_id)
-    if violation is None or violation.chat_id != chat_id:
+    if not belongs_to_chat(violation, chat_id):
         # Nothing to lift — or callback data forged for another chat (§13).
         return LiftOutcome(won=False, decided_by="?")
 

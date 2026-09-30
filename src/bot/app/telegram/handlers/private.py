@@ -21,9 +21,11 @@ from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.journal import JournalRepository
 from app.db.repositories.notice_templates import NoticeTemplateRepository
+from app.db.repositories.statistics import StatisticsRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.domain import ladder_edits
 from app.domain.backends import never_available
+from app.domain.guards import belongs_to_chat
 from app.domain.lifecycle import rights_missing
 from app.domain.linking import REQUIRED_RIGHTS
 from app.i18n import SUPPORTED_LANGUAGES, translator_for
@@ -992,21 +994,9 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
             return
 
-        entries, total = await JournalRepository(session).page(
-            chat.chat_id, page=callback_data.page
+        await _show_journal_page(
+            bot, session, navigator, bot_user, chat, callback_data.page, i18n, callback
         )
-        await navigator.show_journal(
-            bot=bot,
-            session=session,
-            user=bot_user,
-            chat_id=chat.chat_id,
-            chat_title=chat.title,
-            entries=entries,
-            total=total,
-            page=callback_data.page,
-            locale=i18n.locale,
-        )
-        await callback.answer()
 
     @router.callback_query(StatisticsCallback.filter(), F.message.chat.type == "private")
     async def open_statistics(
@@ -1035,7 +1025,7 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             return
 
         days = callback_data.days if callback_data.days in WINDOWS else WINDOWS[0]
-        stats = await JournalRepository(session).statistics(
+        stats = await StatisticsRepository(session).statistics(
             chat.chat_id, since=clock.now() - timedelta(days=days)
         )
         await navigator.show_statistics(
@@ -1074,21 +1064,9 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
 
         journal = JournalRepository(session)
         card = await journal.card(callback_data.violation_id, now=clock.now())
-        if card is None or card.chat_id != chat.chat_id:
+        if not belongs_to_chat(card, chat.chat_id):
             # A stale entry: back to the Journal's first page (§13).
-            entries, total = await journal.page(chat.chat_id, page=0)
-            await navigator.show_journal(
-                bot=bot,
-                session=session,
-                user=bot_user,
-                chat_id=chat.chat_id,
-                chat_title=chat.title,
-                entries=entries,
-                total=total,
-                page=0,
-                locale=i18n.locale,
-            )
-            await callback.answer()
+            await _show_journal_page(bot, session, navigator, bot_user, chat, 0, i18n, callback)
             return
         await navigator.show_violation_card(
             bot=bot,
@@ -1139,6 +1117,32 @@ async def _accessible_chat(
     if chat is None or not await admin_cache.is_admin(bot, chat.chat_id, callback.from_user.id):
         return None
     return chat
+
+
+async def _show_journal_page(
+    bot: Bot,
+    session: AsyncSession,
+    navigator: MenuNavigator,
+    bot_user: BotUser,
+    chat: Chat,
+    page: int,
+    i18n: I18nContext,
+    callback: CallbackQuery,
+) -> None:
+    """Load one Journal page and edit the Menu into it, then answer the press (§13)."""
+    entries, total = await JournalRepository(session).page(chat.chat_id, page=page)
+    await navigator.show_journal(
+        bot=bot,
+        session=session,
+        user=bot_user,
+        chat_id=chat.chat_id,
+        chat_title=chat.title,
+        entries=entries,
+        total=total,
+        page=page,
+        locale=i18n.locale,
+    )
+    await callback.answer()
 
 
 async def _current_sensitivity(session: AsyncSession, chat_id: int) -> str:

@@ -9,7 +9,7 @@ pipeline (§12).
 
 from app.classifiers.router import BackendRouter
 from app.classifiers.spec import JEV_MODEL_DEFAULT, LAYA_MODEL
-from app.main import DEFAULT_MODELS, build_models, models_of
+from app.main import DEFAULT_MODELS, build_models
 
 from tests.support.backend import FakeBackend
 
@@ -22,15 +22,17 @@ def test_the_default_models_pin_both_defaults() -> None:
     assert DEFAULT_MODELS == {"laya": LAYA_MODEL, "jev": JEV_MODEL_DEFAULT}
 
 
-def test_models_of_reads_the_models_the_router_was_built_with() -> None:
+def test_the_router_carries_the_models_it_was_built_with() -> None:
     router = BackendRouter(laya=FakeBackend(), jev=FakeBackend(), models={"laya": "laya-9"})
-    assert models_of(router) == {"laya": "laya-9"}
+    assert router.models == {"laya": "laya-9"}
 
 
-def test_models_of_reads_the_router_without_models_of_its_own() -> None:
+def test_a_router_without_models_of_its_own_pins_the_defaults() -> None:
     router = BackendRouter(laya=FakeBackend(), jev=FakeBackend())
-    assert models_of(router) == {"laya": LAYA_MODEL, "jev": JEV_MODEL_DEFAULT}
+    assert router.models == {"laya": LAYA_MODEL, "jev": JEV_MODEL_DEFAULT}
 
 
-def test_models_of_falls_back_to_the_defaults_for_a_bare_backend() -> None:
-    assert models_of(FakeBackend()) == DEFAULT_MODELS
+def test_a_stand_in_backend_carries_models_of_its_own() -> None:
+    # The ClassifierBackend protocol declares `models` (§12): a dispatcher is
+    # never wired without a model per backend, a stand-in included.
+    assert FakeBackend().models == DEFAULT_MODELS

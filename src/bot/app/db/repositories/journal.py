@@ -1,9 +1,9 @@
-"""Repository for the Statistics and Journal screens (§13).
+"""Repository for the Journal screen (§13).
 
-Statistics counts one chat's checks, Violations, Suspicions, Appeals and
-False Positives over a window; the Journal pages the chat's Violations
-newest first, and the Violation card joins the row with its check (the
-confidence), its stored text and its current state (§6).
+The Journal pages the chat's Violations newest first, and the Violation
+card joins the row with its check (the confidence), its stored text and
+its current state (§6). The Statistics counts live in the statistics
+repository beside this one.
 """
 
 from dataclasses import dataclass
@@ -13,22 +13,11 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Appeal, FlaggedMessage, MessageCheck, Suspicion, Violation
-from app.domain.ladder import violation_state
+from app.db.models import FlaggedMessage, MessageCheck, Violation
+from app.domain.ladder import ViolationState, violation_state
 
 #: The Journal shows five Violations per page (§13).
 PAGE_SIZE = 5
-
-
-@dataclass(frozen=True, slots=True)
-class ChatStatistics:
-    """The §13 Statistics counts for one window: 7 or 30 days."""
-
-    checked: int
-    violations_by_category: dict[str, int]
-    suspicions: int
-    appeals: int
-    false_positives: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +45,7 @@ class ViolationCard:
     category: str
     confidence: float | None
     step_seconds: int | None
-    state: str
+    state: ViolationState
     flagged_text: str | None
     flagged_entities: list[dict[str, Any]] | None
     created_at: datetime
@@ -65,52 +54,6 @@ class ViolationCard:
 class JournalRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-
-    async def statistics(self, chat_id: int, *, since: datetime) -> ChatStatistics:
-        """The Statistics counts for the window since `since` (§13).
-
-        Every count anchors on when it happened: checks, Violations,
-        Suspicions and Appeals by their own `created_at`, so the two windows
-        never double-count. A revoked Violation still counts in its Category
-        — the False Positives line is where it shows up.
-        """
-        checked = await self._count(
-            select(func.count())
-            .select_from(MessageCheck)
-            .where(MessageCheck.chat_id == chat_id, MessageCheck.created_at >= since)
-        )
-        category_rows = await self.session.execute(
-            select(Violation.category, func.count())
-            .where(Violation.chat_id == chat_id, Violation.created_at >= since)
-            .group_by(Violation.category)
-        )
-        suspicions = await self._count(
-            select(func.count())
-            .select_from(Suspicion)
-            .where(Suspicion.chat_id == chat_id, Suspicion.created_at >= since)
-        )
-        appeals = await self._count(
-            select(func.count())
-            .select_from(Appeal)
-            .join(Violation, Appeal.violation_id == Violation.id)
-            .where(Violation.chat_id == chat_id, Appeal.created_at >= since)
-        )
-        false_positives = await self._count(
-            select(func.count())
-            .select_from(Violation)
-            .where(
-                Violation.chat_id == chat_id,
-                Violation.created_at >= since,
-                Violation.revoked_at.is_not(None),
-            )
-        )
-        return ChatStatistics(
-            checked=checked,
-            violations_by_category=dict(category_rows.all()),
-            suspicions=suspicions,
-            appeals=appeals,
-            false_positives=false_positives,
-        )
 
     async def page(self, chat_id: int, *, page: int) -> tuple[list[JournalEntry], int]:
         """One Journal page, newest first, with the total to steer the ends (§13)."""

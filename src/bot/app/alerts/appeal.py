@@ -26,6 +26,7 @@ from app.db.models import Appeal, Chat, ChatNotice, FlaggedMessage, MessageCheck
 from app.db.repositories.alerts import AlertRepository
 from app.db.repositories.appeals import AppealRepository
 from app.db.repositories.moderation import ModerationRepository
+from app.domain.guards import belongs_to_chat
 from app.i18n import GetText, translator_for
 from app.linking.admin_cache import AdminCache
 from app.moderation.actions import lift_restriction
@@ -61,7 +62,7 @@ async def file_appeal(
     presser: User,
 ) -> FiledAppeal:
     """Run the §8 checks and file the Appeal; a refused check names its toast."""
-    if violation.chat_id != chat.chat_id:
+    if not belongs_to_chat(violation, chat.chat_id):
         # The callback data is forged for another chat: nothing is filed (§13).
         return FiledAppeal()
     repo = AppealRepository(session)
@@ -154,7 +155,7 @@ async def decide_appeal(
     if appeal is None:
         return AppealDecision(won=False, decided_by="?")
     violation = await session.get(Violation, appeal.violation_id)
-    if violation is None or violation.chat_id != chat.chat_id:
+    if not belongs_to_chat(violation, chat.chat_id):
         # Nothing to decide — or callback data forged for another chat (§13).
         return AppealDecision(won=False, decided_by="?")
 

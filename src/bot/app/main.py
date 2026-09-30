@@ -59,16 +59,6 @@ def build_models(jev_model: str) -> dict[str, str]:
 DEFAULT_MODELS = build_models(JEV_MODEL_DEFAULT)
 
 
-def models_of(classifier: ClassifierBackend) -> Mapping[str, str]:
-    """The classifier's own models, when it carries them (§12).
-
-    A bare check-only stand-in (tests) has none: the defaults apply, so a
-    dispatcher is never wired without a model per backend.
-    """
-    models = getattr(classifier, "models", None)
-    return models if models is not None else DEFAULT_MODELS
-
-
 def build_classifier(
     *,
     base_url: str = LAYA_BASE_URL,
@@ -155,7 +145,7 @@ def build_dispatcher(
         core=i18n.core,
         backend=classifier if classifier is not None else build_classifier(),
         thresholds=thresholds if thresholds is not None else default_thresholds(),
-        models=models if models is not None else models_of(classifier_),
+        models=models if models is not None else classifier_.models,
         min_words=min_words,
         flagged_text_days=flagged_text_days,
         max_notice_lifetime_h=max_notice_lifetime_h,

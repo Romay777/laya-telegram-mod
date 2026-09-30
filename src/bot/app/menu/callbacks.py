@@ -212,10 +212,13 @@ class LiftRestrictionCallback(CallbackData, prefix="lift"):
     """🟢 Lift restriction on a Violation's Admin Alert copy (§9).
 
     Carries the `chat_id` so the handler can re-check Admin access (§13).
+    `page` is the Journal page when the press came from the Menu's card
+    (§13), so Back returns there; alert copies press without it.
     """
 
     chat_id: int
     violation_id: int
+    page: int = 0
 
 
 class AppealCallback(CallbackData, prefix="appeal"):

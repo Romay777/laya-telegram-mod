@@ -18,6 +18,7 @@ from app.clock import Clock
 from app.db.models import BotUser
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.journal import JournalRepository
+from app.domain.guards import belongs_to_chat
 from app.i18n import translator_for
 from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
@@ -190,6 +191,7 @@ async def _reshow_card(
     The lift itself already edited every alert copy (§9); this covers the
     Menu, whose card shows the same Violation. A press on an alert copy —
     any message but the Admin's stored Menu one — leaves the Menu alone.
+    The card carries the Journal page it came from, so Back keeps working.
     """
     if bot_user.menu_message_id is None or callback.message is None:
         return
@@ -197,7 +199,7 @@ async def _reshow_card(
         return
     chat = await ChatRepository(session).get(callback_data.chat_id)
     card = await JournalRepository(session).card(callback_data.violation_id, now=clock.now())
-    if chat is None or card is None or card.chat_id != chat.chat_id:
+    if chat is None or not belongs_to_chat(card, chat.chat_id):
         return
     await navigator.show_violation_card(
         bot=bot,
@@ -206,6 +208,6 @@ async def _reshow_card(
         chat_id=chat.chat_id,
         chat_title=chat.title,
         card=card,
-        page=0,
+        page=callback_data.page,
         locale=i18n.locale,
     )

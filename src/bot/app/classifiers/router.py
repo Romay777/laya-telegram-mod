@@ -82,7 +82,12 @@ class BackendCheck:
 
 
 class ClassifierBackend(Protocol):
-    """What the moderation pipeline asks for: one check, one outcome."""
+    """What the pipeline and the wiring ask of the classifier (§5, §12)."""
+
+    @property
+    def models(self) -> Mapping[str, str]:
+        """The pinned model of every backend, as `message_check` rows record them (§12)."""
+        ...
 
     async def check(self, backend: str, state: dict[str, Any]) -> BackendCheck: ...
 
@@ -105,10 +110,6 @@ class BackendRouter:
             models if models is not None else {LAYA: LAYA_MODEL, JEV: JEV_MODEL_DEFAULT}
         )
         self._semaphore = asyncio.Semaphore(max_concurrency)
-
-    def model_of(self, backend: str) -> str:
-        """The pinned model of one backend, as a `message_check` row records it (§12)."""
-        return self._models[backend]
 
     @property
     def models(self) -> Mapping[str, str]:
