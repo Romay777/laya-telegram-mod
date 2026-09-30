@@ -32,3 +32,19 @@ def restricted_until(now: datetime, step_seconds: int) -> datetime | None:
     if step_seconds <= 0 or not MIN_TIMED_SECONDS <= step_seconds <= MAX_TIMED_SECONDS:
         return None
     return now + timedelta(seconds=step_seconds)
+
+
+def violation_state(
+    *, revoked_at: datetime | None, expires_at: datetime | None, now: datetime
+) -> str:
+    """The state of a Violation at `now` (§6): `active`, `expired` or `false_positive`.
+
+    A revoked Violation is a False Positive whatever its Expiry; an unrevoked
+    one stops being Active at its Expiry moment, the same boundary
+    `count_active` draws.
+    """
+    if revoked_at is not None:
+        return "false_positive"
+    if expires_at is not None and expires_at <= now:
+        return "expired"
+    return "active"
