@@ -61,6 +61,9 @@ async def file_appeal(
     presser: User,
 ) -> FiledAppeal:
     """Run the §8 checks and file the Appeal; a refused check names its toast."""
+    if violation.chat_id != chat.chat_id:
+        # The callback data is forged for another chat: nothing is filed (§13).
+        return FiledAppeal()
     repo = AppealRepository(session)
     if await repo.by_violation(violation.id) is not None:
         return FiledAppeal(toast="notice-appeal-already-sent")
@@ -150,6 +153,10 @@ async def decide_appeal(
     appeal = await session.get(Appeal, appeal_id)
     if appeal is None:
         return AppealDecision(won=False, decided_by="?")
+    violation = await session.get(Violation, appeal.violation_id)
+    if violation is None or violation.chat_id != chat.chat_id:
+        # Nothing to decide — or callback data forged for another chat (§13).
+        return AppealDecision(won=False, decided_by="?")
 
     status = "approved" if approve else "rejected"
     if not await AppealRepository(session).decide(
@@ -158,10 +165,6 @@ async def decide_appeal(
         return AppealDecision(
             won=False, decided_by=await decided_by(bot, chat.chat_id, appeal.decided_by)
         )
-
-    violation = await session.get(Violation, appeal.violation_id)
-    if violation is None:
-        return AppealDecision(won=True, decided_by=handle_of(admin))
 
     t = notice_text_translator(core, chat)
     if approve:

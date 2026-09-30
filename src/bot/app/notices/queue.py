@@ -3,9 +3,11 @@
 Each chat has an in-memory FIFO drained by a sender task. The drain paces
 itself through `domain.rate_limit` — at most `per_second` messages per
 second and `per_minute` per rolling minute — sleeps out a Telegram
-`retry_after` on a 429 and retries the same notice, and drops any notice
-that sat in the queue longer than `max_queue_age_s`, telling its producer
-so the Violation can be marked `notice_dropped` (§7).
+`retry_after` on a 429 and retries the same notice, drops any notice that
+sat in the queue longer than `max_queue_age_s`, and drops a notice Telegram
+refuses outright (or whose bookkeeping fails) — telling its producer so the
+Violation can be marked `notice_dropped` (§7). One failed notice never ends
+the drain: the notices behind it go out all the same.
 
 What sending and dropping *mean* is the producer's business: every
 `PendingNotice` carries its own `send` and `on_dropped` callables. The
@@ -14,16 +16,20 @@ Restriction is already in place (§7).
 """
 
 import asyncio
+import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.clock import Clock
 from app.domain.rate_limit import next_send_at
+
+logger = logging.getLogger(__name__)
 
 #: One notice sits no longer than this in the queue (§7 `max_queue_age_s`).
 DEFAULT_MAX_QUEUE_AGE_S = 300
@@ -106,7 +112,7 @@ class NoticeQueue:
             # and so is every notice behind it that has aged the same (§7).
             if now - notice.enqueued_at > self._max_queue_age:
                 pending.popleft()
-                await notice.on_dropped()
+                await self._drop(chat_id, notice)
                 continue
 
             slot = next_send_at(now, sent, per_second=self._per_second, per_minute=self._per_minute)
@@ -122,8 +128,28 @@ class NoticeQueue:
                 pending.appendleft(notice)
                 await self._sleep(float(retry.retry_after))
                 continue
+            except (TelegramAPIError, SQLAlchemyError):
+                # Telegram refused the notice (the bot was kicked, say), or
+                # its bookkeeping failed: drop it like a stale one and go on —
+                # one failed notice never ends the drain (§7). Anything else
+                # stays an error: a bug in the queue's own work must be loud.
+                logger.warning("notice for chat %s failed to send; dropped", chat_id, exc_info=True)
+                await self._drop(chat_id, notice)
+                continue
 
             sent.append(self._clock.now())
             cutoff = self._clock.now() - _MINUTE
             while sent and sent[0] <= cutoff:
                 sent.popleft()
+
+    async def _drop(self, chat_id: int, notice: PendingNotice) -> None:
+        """Tell the producer its notice was dropped; the drain goes on regardless (§7).
+
+        The drop-bookkeeping opens its own session — and even when that
+        fails, the notice is already out of the queue: nothing is gained by
+        letting the failure end the drain.
+        """
+        try:
+            await notice.on_dropped()
+        except (TelegramAPIError, SQLAlchemyError):
+            logger.warning("drop bookkeeping for chat %s failed", chat_id, exc_info=True)

@@ -110,6 +110,11 @@ class BackendRouter:
         """The pinned model of one backend, as a `message_check` row records it (§12)."""
         return self._models[backend]
 
+    @property
+    def models(self) -> Mapping[str, str]:
+        """The pinned model of every backend, as `message_check` rows record them (§12)."""
+        return self._models
+
     def probe_forever(self, interval_s: float) -> Coroutine[Any, Any, None]:
         """The Laya /health prober loop, started beside the poller in `main` (§5).
 

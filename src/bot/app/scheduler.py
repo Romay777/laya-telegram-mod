@@ -99,6 +99,11 @@ class Scheduler:
             )
         except TelegramAPIError:
             logger.exception("observation summary for chat %s failed", chat.chat_id)
+            return
+        # The message is out, so the mark becomes durable at once: a failure
+        # in a later job of this tick must not roll `summary_sent` back and
+        # repeat the summary (§11: sent once, never repeated).
+        await session.commit()
 
     async def run_forever(self) -> None:
         """The §11 loop: every job, every 30 seconds, until the bot stops."""

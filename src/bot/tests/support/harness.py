@@ -119,7 +119,8 @@ async def build_app(
         # group prompt actually deletes inside the test.
         prompt_delete_after_s=prompt_delete_after_s,
         classifier=classifier,
-        models={"laya": "multilingual", "jev": "jev-1.13.0"},
+        # No models are passed: the pipeline records the classifier's own
+        # (§12), the way `run()` wires production.
         notices=notice_queue,
         # The default pace is one alert per second per Admin (§9); tests
         # must not wait on it.

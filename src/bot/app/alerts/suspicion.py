@@ -69,7 +69,8 @@ async def decide_suspicion(
     """Apply one decision press on a Suspicion alert copy (§9)."""
     repo = SuspicionRepository(session)
     suspicion = await repo.get(suspicion_id)
-    if suspicion is None:
+    if suspicion is None or suspicion.chat_id != chat.chat_id:
+        # Nothing to decide — or callback data forged for another chat (§13).
         return SuspicionDecision(won=False, decided_by="?")
 
     status = "punished" if punish else "dismissed"

@@ -33,7 +33,8 @@ async def unban_channel(
 ) -> None:
     """Apply one 🟢 Unban press (§4): lift the ban, tell every copy."""
     violation = await session.get(Violation, violation_id)
-    if violation is None:
+    if violation is None or violation.chat_id != chat_id:
+        # Nothing to unban — or callback data forged for another chat (§13).
         return
     await unban_sender_chat(bot, chat_id, violation.user_id)
 

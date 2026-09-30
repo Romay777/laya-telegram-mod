@@ -12,6 +12,7 @@ from itertools import count
 import pytest
 from aiogram.methods import GetChatMember
 from app.db.models import Chat, Suspicion
+from app.db.repositories.chats import ChatRepository
 from app.menu.callbacks import SuspicionDecideCallback
 from app.scheduler import Scheduler
 from sqlalchemy import select
@@ -150,6 +151,58 @@ async def scheduler(app: TestApp):
     return Scheduler(
         bot=app.bot, session_maker=app.session_maker, clock=app.clock, core=app.i18n.core
     )
+
+
+async def test_a_failure_later_in_the_tick_does_not_repeat_the_summary(
+    app: TestApp, admin_id: int, chat_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A job that raises after the summary must not roll `summary_sent` back (§11).
+
+    The tick's transaction commits the sent summary at once, so even the
+    removed-chat purge crashing behind it leaves the offer made — and the
+    next tick does not repeat it (§11: sent once, never repeated).
+    """
+    menu = await linked_menu(app, admin_id, chat_id)
+    app.session.script(GetChatMember, member_owner(user(admin_id)))
+    await app.feed(
+        private_callback_update(admin_id, f"observe:{chat_id}", menu, language_code="en")
+    )
+    app.session.calls.clear()
+
+    # A chat removed long ago gives the tick's purge job work to do — and the
+    # purge raises, the way a real failure would (§10).
+    async with app.session_maker() as db:
+        db.add(
+            Chat(
+                chat_id=chat_id - 1,
+                title="Old Chat",
+                status="removed",
+                linker_id=admin_id,
+                linked_at=FIXED_NOW - timedelta(days=40),
+                removed_at=FIXED_NOW - timedelta(days=31),
+            )
+        )
+        await db.commit()
+
+    async def failing_purge(self: ChatRepository, chat_id: int) -> None:
+        raise RuntimeError("the purge failed")
+
+    monkeypatch.setattr(ChatRepository, "purge", failing_purge)
+
+    app.clock.advance(timedelta(hours=48))
+    with pytest.raises(RuntimeError):
+        await (await scheduler(app)).run_once()
+
+    # The message went out and the mark is durable, crash or no crash (§11).
+    (summary,) = app.session.calls_of("SendMessage")
+    assert summary.method.chat_id == admin_id
+    chat = await stored_chat(app.session_maker, chat_id)
+    assert chat is not None and chat.summary_sent is True
+
+    app.session.calls.clear()
+    with pytest.raises(RuntimeError):
+        await (await scheduler(app)).run_once()
+    assert app.session.calls == []  # sent once, never repeated (§11)
 
 
 async def test_the_48_hour_summary_fires_once_and_enabling_arms_the_chat(

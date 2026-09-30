@@ -13,7 +13,7 @@ from app.alerts.fanout import AlertFanout
 from app.classifiers.client import SystemOneClient
 from app.classifiers.health import LayaHealth
 from app.classifiers.router import BackendRouter, ClassifierBackend
-from app.classifiers.spec import LAYA_BASE_URL, LAYA_MODEL
+from app.classifiers.spec import JEV_MODEL_DEFAULT, LAYA_BASE_URL, LAYA_MODEL
 from app.clock import Clock, SystemClock
 from app.config import ClassifierSettings, Settings, default_thresholds
 from app.db.fsm_storage import PostgresStorage
@@ -44,17 +44,29 @@ def build_session_maker(database_url: str) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(create_async_engine(database_url), expire_on_commit=False)
 
 
-def build_models(jev_api_key: str | None, jev_model: str) -> dict[str, str]:
-    """The pinned model of every backend present, for the `message_check` rows (§12)."""
-    models = {LAYA: LAYA_MODEL}
-    if jev_available(jev_api_key):
-        models[JEV] = jev_model
-    return models
+def build_models(jev_model: str) -> dict[str, str]:
+    """The pinned model of every backend, for the `message_check` rows (§12).
+
+    Both backends are named even when Jev has no key: a stale chat choice
+    (§5) still records its checks and skips against Jev, and a missing
+    model must never KeyError the pipeline.
+    """
+    return {LAYA: LAYA_MODEL, JEV: jev_model}
 
 
 #: The recorded models when the caller brings no router of their own (§12):
 #: Laya pins its checkpoint, Jev the ticket's pinned default.
-DEFAULT_MODELS = build_models(None, "jev-1.13.0")
+DEFAULT_MODELS = build_models(JEV_MODEL_DEFAULT)
+
+
+def models_of(classifier: ClassifierBackend) -> Mapping[str, str]:
+    """The classifier's own models, when it carries them (§12).
+
+    A bare check-only stand-in (tests) has none: the defaults apply, so a
+    dispatcher is never wired without a model per backend.
+    """
+    models = getattr(classifier, "models", None)
+    return models if models is not None else DEFAULT_MODELS
 
 
 def build_classifier(
@@ -83,7 +95,7 @@ def build_classifier(
         ),
         health=LayaHealth(base_url, timeout_s=timeout_s),
         max_concurrency=max_concurrency,
-        models=build_models(jev_api_key, jev_model),
+        models=build_models(jev_model),
     )
 
 
@@ -143,7 +155,7 @@ def build_dispatcher(
         core=i18n.core,
         backend=classifier if classifier is not None else build_classifier(),
         thresholds=thresholds if thresholds is not None else default_thresholds(),
-        models=models if models is not None else DEFAULT_MODELS,
+        models=models if models is not None else models_of(classifier_),
         min_words=min_words,
         flagged_text_days=flagged_text_days,
         max_notice_lifetime_h=max_notice_lifetime_h,

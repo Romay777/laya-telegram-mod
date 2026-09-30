@@ -178,6 +178,49 @@ async def test_a_429_sleeps_retry_after_and_retries_the_same_notice() -> None:
     assert fx.clock.now() == T0 + timedelta(seconds=7)
 
 
+async def test_a_refused_notice_is_dropped_and_the_drain_goes_on() -> None:
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import SendMessage
+
+    # Telegram refuses the notice outright (the bot was kicked, say): the
+    # notice is dropped like a stale one and the notices behind it go out (§7).
+    fx = QueueFixture(FakeClock(T0), per_second=1)
+    refused = SendRecorder()
+    refused.fail_next_with = TelegramBadRequest(
+        method=SendMessage(chat_id=-100450, text="notice"),
+        message="Bad Request: chat not found",
+    )
+    failed = fx.enqueue(send=refused)
+    behind = fx.enqueue()
+
+    await fx.queue.flush()
+
+    assert refused.attempts == 1  # the refused attempt
+    assert failed.on_dropped.dropped == 1  # the producer is told (§7)
+    assert behind.send.attempts == 1  # the drain did not die with the failure
+    assert behind.on_dropped.dropped == 0
+
+
+async def test_a_failed_drop_does_not_end_the_drain() -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    # Even the drop's own bookkeeping failing — a DB error — leaves the
+    # notices behind it going out (§7).
+    fx = QueueFixture(FakeClock(T0), per_second=1)
+
+    async def failing_drop() -> None:
+        raise SQLAlchemyError("the drop failed")
+
+    stale = fx.enqueue(on_dropped=failing_drop, enqueued_at=T0 - timedelta(seconds=301))
+    behind = fx.enqueue()
+
+    await fx.queue.flush()
+
+    assert stale.send.attempts == 0  # type: ignore[attr-defined] — stale, never posted
+    assert behind.send.attempts == 1  # type: ignore[attr-defined]
+    assert behind.on_dropped.dropped == 0  # type: ignore[attr-defined]
+
+
 async def test_a_notice_older_than_max_queue_age_is_dropped_without_sending() -> None:
     # A slow pace (one notice per 10 s) against a 5 s queue age: the second
     # notice's slot comes long after it has gone stale (§7).
