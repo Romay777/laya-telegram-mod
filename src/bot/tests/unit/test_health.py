@@ -47,7 +47,8 @@ async def test_the_probe_hits_the_health_path() -> None:
     await health.probe_once()
     await health.aclose()
 
-    assert seen["url"] == "http://laya:8000/v1/health"
+    # The /v1 base URL is the classifier's; the probe still hits the root.
+    assert seen["url"] == "http://laya:8000/health"
     assert seen["method"] == "GET"
 
 

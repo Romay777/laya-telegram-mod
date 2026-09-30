@@ -26,7 +26,13 @@ class LayaHealth:
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_s: float = 3.0,
     ) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout_s, transport=transport)
+        # /health sits at the server root, outside the /v1 prefix the
+        # classification base URL carries (§5, §16).
+        self._client = httpx.AsyncClient(
+            base_url=httpx.URL(base_url).copy_with(raw_path=b"/"),
+            timeout=timeout_s,
+            transport=transport,
+        )
         self._ever_answered = False
         self._last_ok = False
 
