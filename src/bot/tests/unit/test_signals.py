@@ -40,12 +40,18 @@ def test_plain_text_counts_as_nothing() -> None:
     assert not has_link_invite_or_mention("just talking here", [])
 
 
-def test_is_short_follows_min_words_and_the_link_exception() -> None:
-    assert is_short(text="hi there", entities=[], min_words=3)
-    assert is_short(text="hi", entities=[], min_words=3)
-    assert not is_short(text="hi there friends", entities=[], min_words=3)
-    # Short, but the invite link keeps it in the pipeline (§4 step 4).
-    assert not is_short(text="join t.me/+abc", entities=[], min_words=3)
+def test_is_short_follows_min_chars_and_the_link_exception() -> None:
+    assert is_short(text="hi there", entities=[], min_chars=10)
+    assert is_short(text="hi", entities=[], min_chars=10)
+    assert not is_short(text="hi there friends", entities=[], min_chars=10)
+    # Under the limit, but the invite link keeps it in the pipeline (§4 step 4).
+    assert not is_short(text="t.me/+abc", entities=[], min_chars=10)
+
+
+def test_is_short_counts_characters_like_telegram_does() -> None:
+    # Six emoji are 6 Python code points but 12 UTF-16 units, the count
+    # Telegram shows — enough to clear a limit of 10 (§4 step 4).
+    assert not is_short(text="😡" * 6, entities=[], min_chars=10)
 
 
 def test_an_invite_link_is_detected_in_text_and_in_text_link_targets() -> None:

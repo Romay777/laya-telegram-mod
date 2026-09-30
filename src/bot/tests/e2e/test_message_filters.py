@@ -13,7 +13,7 @@ from itertools import count
 import pytest
 from aiogram.methods import GetChatMember
 from aiogram.types import MessageEntity
-from app.db.models import MessageCheck
+from app.db.models import Chat, MessageCheck
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -101,6 +101,27 @@ async def test_a_short_link_free_message_is_skipped_as_skipped_short(
     (check,) = await all_checks(app.session_maker)
     assert check.outcome == "skipped_short"
     assert check.category is None
+
+
+async def test_the_chat_s_own_minimum_length_is_honored(
+    app: TestApp, admin_id: int, member_id: int, chat_id: int
+) -> None:
+    """The chat's `min_chars` (§13): Off sends every message to the model."""
+    await auto_moderation_chat(app, admin_id, chat_id)
+    async with app.session_maker() as db:
+        chat = await db.get(Chat, chat_id)
+        assert chat is not None
+        chat.min_chars = 0
+        await db.commit()
+    app.backend.script(CLEAN)
+    app.session.script(GetChatMember, member_member(user(member_id)))
+    app.session.calls.clear()
+
+    await app.feed(group_message_update(chat_id, member_id, "hi", message_id=94))
+
+    assert len(app.backend.calls) == 1  # nothing is too short in this chat
+    (check,) = await all_checks(app.session_maker)
+    assert check.outcome == "clean"
 
 
 async def test_a_link_keeps_a_short_message_in_the_pipeline(

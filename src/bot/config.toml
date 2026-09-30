@@ -37,7 +37,6 @@ max_concurrency = 4
 health_interval_s = 60
 
 [moderation]
-min_words = 3
 new_member_hours = 24
 new_member_messages = 3
 

@@ -117,7 +117,7 @@ Operators normally never touch this file. Every value has a default.
 | `[thresholds.<backend>.<sensitivity>]` | `violation`, `suspicion`. Starting values below, not calibrated. |
 | `[signals]` | threshold adjustments, see below |
 | `[classifier]` | `timeout_s = 3`, `max_concurrency = 4`, `health_interval_s = 60` |
-| `[moderation]` | `min_words = 3`, `new_member_hours = 24`, `new_member_messages = 3` |
+| `[moderation]` | `new_member_hours = 24`, `new_member_messages = 3` |
 | `[notices]` | `per_second = 1`, `per_minute = 18`, `max_queue_age_s = 300`, `max_lifetime_h = 24`, `outcome_visible_s = 600` |
 | `[suspicions]` | `auto_close_h = 24` |
 | `[observation]` | `summary_after_h = 48` |
@@ -150,7 +150,7 @@ A `message` or `edited_message` update from a **Linked Chat** in `active` status
    - `sender_chat` is the chat's linked channel.
 2. **Age filter.** Edits to messages older than 48 hours are skipped, because Telegram no longer allows deleting them.
 3. **Text extraction.** The text is `text` or `caption`. URLs from `url` and `text_link` entities are collected separately. Messages with no text, such as a bare photo or a sticker, are skipped.
-4. **Short-message filter.** Messages with fewer than `min_words` words and no URL, invite or @mention are skipped as `skipped_short`.
+4. **Short-message filter.** Messages shorter than the chat's `min_chars` characters and with no URL, invite or @mention are skipped as `skipped_short`.
 5. **Signals.** Computed from the `member` row and the text (§3). They adjust the thresholds only.
 6. **Classification.** The Backend router (§5) returns per-label probabilities, or a skip outcome (`skipped_timeout`, `skipped_overload`, `skipped_unavailable`).
 7. **Verdict.** Among the Categories enabled for the chat, pick the one with the highest probability. Disabled Categories are ignored, although the model is always asked about all of them so the question spec stays fixed.
@@ -428,7 +428,7 @@ Every chat-scoped table carries a `chat_id` foreign key with `ON DELETE CASCADE`
 | Table | Key columns |
 |---|---|
 | `bot_user` | `user_id` PK, `language` (`en`\|`ru`), `menu_message_id`, `started_at`, `reachable` |
-| `chat` | `chat_id` PK, `title`, `status` (`active`\|`suspended`\|`removed`), `mode` (`observation`\|`auto`), `backend` (`laya`\|`jev`), `sensitivity` (`lenient`\|`balanced`\|`strict`), `chat_language`, `ladder` (int[] seconds, 0 = forever), `expiry_seconds` (null = never), `linker_id`, `linked_at`, `observation_summary_at`, `summary_sent`, `removed_at` |
+| `chat` | `chat_id` PK, `title`, `status` (`active`\|`suspended`\|`removed`), `mode` (`observation`\|`auto`), `backend` (`laya`\|`jev`), `sensitivity` (`lenient`\|`balanced`\|`strict`), `min_chars`, `chat_language`, `ladder` (int[] seconds, 0 = forever), `expiry_seconds` (null = never), `linker_id`, `linked_at`, `observation_summary_at`, `summary_sent`, `removed_at` |
 | `category` | `code` PK (`spam`, `ads`, `insult`), `builtin` bool. Seeded. Rows for custom Categories are reserved for later. |
 | `chat_category` | (`chat_id`, `category_code`) PK, `enabled`, `violation_threshold`, `suspicion_threshold` (both nullable: null means use the Sensitivity preset; per-Category overrides are reserved for later) |
 | `notice_template` | `chat_id` PK, `text`, `entities` (jsonb, Telegram `MessageEntity[]`), `updated_by`, `updated_at` |
@@ -459,6 +459,7 @@ Indexes:
 | `mode` | `observation` |
 | `backend` | `laya` if Laya is deployed, otherwise `jev` |
 | `sensitivity` | `balanced` |
+| `min_chars` | `10` |
 | `chat_language` | the Linker's interface language |
 | `ladder` | `[3600, 86400, 0]` |
 | `expiry_seconds` | 30 days |
@@ -496,6 +497,7 @@ Chat  (status: mode · backend · Sensitivity · suspended/ok)
  │   ├─ Mode: 🟢 Enable auto-moderation  /  Switch to observation
  │   ├─ Categories (toggle spam / ads / insult)
  │   ├─ Sensitivity (Lenient / Balanced / Strict)
+ │   ├─ Minimum length (Off / 5 / 10 / 20 / 40 characters)
  │   ├─ Penalty Ladder ──► Step N ──► duration presets; ➕ Add step; 🔴 Remove last; Expiry presets
  │   ├─ Chat Language (🇷🇺 / 🇬🇧)
  │   ├─ Notice Template ──► show current · Edit (send text) ──► Preview ──► 🟢 Save / Cancel · 🔴 Reset to default

@@ -123,6 +123,14 @@ class ChatRepository:
         chat.sensitivity = sensitivity
         await self.session.flush()
 
+    async def set_min_chars(self, chat_id: int, min_chars: int) -> None:
+        """The chat's minimum message length (§4 step 4, §13)."""
+        chat = await self.get(chat_id)
+        if chat is None:
+            return
+        chat.min_chars = min_chars
+        await self.session.flush()
+
     async def set_backend(self, chat_id: int, backend: str) -> None:
         """The Classifier Backend this chat's checks go to (§5, §13)."""
         chat = await self.get(chat_id)

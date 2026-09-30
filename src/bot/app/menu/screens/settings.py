@@ -1,4 +1,4 @@
-"""The Settings screen (§13): Mode, Categories, Backend, Sensitivity, Ladder, Language, Template.
+"""The Settings screen (§13): Mode, Categories, Backend, Sensitivity, Minimum length, and more.
 
 Every chat starts in Observation Mode; the Admin arms Auto-moderation here.
 """
@@ -13,6 +13,7 @@ from app.menu.callbacks import (
     ChatLanguageCallback,
     ChatModeCallback,
     LadderCallback,
+    MinCharsCallback,
     MyAlertsCallback,
     NoticeTemplateCallback,
     SensitivityCallback,
@@ -38,6 +39,7 @@ def settings_screen(
                 [categories_button(t, chat_id=chat_id)],
                 [backend_button(t, chat_id=chat_id)],
                 [sensitivity_button(t, chat_id=chat_id)],
+                [min_chars_button(t, chat_id=chat_id)],
                 [ladder_button(t, chat_id=chat_id)],
                 [chat_language_button(t, chat_id=chat_id)],
                 [notice_template_button(t, chat_id=chat_id)],
@@ -98,6 +100,14 @@ def sensitivity_button(t: GetText, *, chat_id: int) -> InlineKeyboardButton:
     return InlineKeyboardButton(
         text=t("menu-chat-sensitivity-setting"),
         callback_data=SensitivityCallback(chat_id=chat_id).pack(),
+    )
+
+
+def min_chars_button(t: GetText, *, chat_id: int) -> InlineKeyboardButton:
+    """Minimum Length (§13): how short a link-free message may stay unchecked."""
+    return InlineKeyboardButton(
+        text=t("menu-chat-min-chars-setting"),
+        callback_data=MinCharsCallback(chat_id=chat_id).pack(),
     )
 
 

@@ -38,6 +38,7 @@ from app.menu.screens import (
     link_expired_screen,
     link_failed_screen,
     linked_chat_screen,
+    min_chars_screen,
     my_alerts_screen,
     notice_template_screens,
     sensitivity_screen,
@@ -213,6 +214,30 @@ class MenuNavigator:
                 chat_title,
                 chat_id=chat_id,
                 sensitivity=sensitivity,
+            ),
+        )
+
+    async def show_min_chars(
+        self,
+        *,
+        bot: Bot,
+        session: AsyncSession,
+        user: BotUser,
+        chat_id: int,
+        chat_title: str | None,
+        min_chars: int,
+        locale: str,
+    ) -> None:
+        """The chat's Minimum Length (§13): how short a message stays unchecked."""
+        await self._show(
+            bot=bot,
+            session=session,
+            user=user,
+            screen=min_chars_screen(
+                translator_for(self.core, locale),
+                chat_title,
+                chat_id=chat_id,
+                min_chars=min_chars,
             ),
         )
 

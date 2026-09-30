@@ -85,7 +85,6 @@ class ModerationPipeline:
         backend: ClassifierBackend,
         thresholds: Thresholds,
         models: Models,
-        min_words: int,
         flagged_text_days: int,
         max_notice_lifetime_h: int,
         fanout: AlertFanout,
@@ -99,7 +98,6 @@ class ModerationPipeline:
         self._backend = backend
         self._thresholds = thresholds
         self._models = models
-        self._min_words = min_words
         self._flagged_text_days = flagged_text_days
         self._max_notice_lifetime_h = max_notice_lifetime_h
         self._fanout = fanout
@@ -170,10 +168,10 @@ class ModerationPipeline:
         now = self._clock.now()
         repo = ModerationRepository(session)
 
-        # §4 step 4: the short-message filter. Short skips never reach the
-        # classifier, so they count on no Member row (§3 reads the history
-        # of *checked* messages).
-        if signals.is_short(text=text, entities=entities, min_words=self._min_words):
+        # §4 step 4: the short-message filter, at the chat's own minimum
+        # length (§13). Short skips never reach the classifier, so they count
+        # on no Member row (§3 reads the history of *checked* messages).
+        if signals.is_short(text=text, entities=entities, min_chars=chat.min_chars):
             await self._record(
                 repo,
                 chat,

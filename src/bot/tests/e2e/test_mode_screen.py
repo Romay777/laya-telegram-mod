@@ -75,6 +75,7 @@ async def test_the_chat_screen_leads_to_the_mode_switch(
         (categories,),
         (_backend,),
         (sensitivity,),
+        (_min_chars,),
         (ladder,),
         (language,),
         (template,),
@@ -83,6 +84,7 @@ async def test_the_chat_screen_leads_to_the_mode_switch(
     ) = edit.reply_markup.inline_keyboard
     assert categories.callback_data == f"chat-categories:{chat_id}:"  # §13: Categories
     assert sensitivity.callback_data == f"chat-sensitivity:{chat_id}:"  # §13: Sensitivity
+    assert _min_chars.callback_data == f"chat-min-chars:{chat_id}:"  # §13: Minimum length
     assert ladder.callback_data == f"chat-ladder:{chat_id}"  # §13: Penalty Ladder
     assert language.callback_data == f"chat-language:{chat_id}:"  # §13: Chat Language
     assert template.callback_data == f"chat-template:{chat_id}"  # §13, §14: Notice Template

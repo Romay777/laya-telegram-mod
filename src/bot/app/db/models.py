@@ -8,11 +8,11 @@ table carries `chat_id` with ON DELETE CASCADE (ADR-0001).
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.domain.linking import DEFAULT_EXPIRY_SECONDS, DEFAULT_LADDER
+from app.domain.linking import DEFAULT_EXPIRY_SECONDS, DEFAULT_LADDER, DEFAULT_MIN_CHARS
 
 
 class Base(DeclarativeBase):
@@ -80,6 +80,8 @@ class Chat(Base):
     backend: Mapped[str] = mapped_column(String(16), default="laya")
     # lenient | balanced | strict.
     sensitivity: Mapped[str] = mapped_column(String(16), default="balanced")
+    # Link-free messages shorter than this skip the check (§4 step 4, §13).
+    min_chars: Mapped[int] = mapped_column(Integer, default=DEFAULT_MIN_CHARS)
     # The language of Chat Notices and buttons, set from the Linker's language.
     chat_language: Mapped[str] = mapped_column(String(8), default="en")
     # Steps in seconds, 0 = forever; the §12 default ladder.

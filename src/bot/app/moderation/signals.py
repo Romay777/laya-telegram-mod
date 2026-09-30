@@ -20,10 +20,6 @@ _LINK_ENTITY_TYPES = ("url", "text_link")
 _MENTION_ENTITY_TYPES = ("mention",)
 
 
-def word_count(text: str) -> int:
-    return len(text.split())
-
-
 def urls_in(text: str, entities: list[dict[str, Any]]) -> list[str]:
     """The URLs of §4 step 3: `url` entities and `text_link` targets."""
     urls: list[str] = []
@@ -68,9 +64,14 @@ def has_invite_link(text: str, entities: list[dict[str, Any]]) -> bool:
     )
 
 
-def is_short(*, text: str, entities: list[dict[str, Any]], min_words: int) -> bool:
-    """The §4 step 4 skip: under `min_words` words and link-free."""
-    return word_count(text) < min_words and not has_link_invite_or_mention(text, entities)
+def utf16_len(text: str) -> int:
+    """The text's length in UTF-16 code units, the count Telegram shows (§4 steps 3-4)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def is_short(*, text: str, entities: list[dict[str, Any]], min_chars: int) -> bool:
+    """The §4 step 4 skip: under the chat's `min_chars` characters and link-free."""
+    return utf16_len(text) < min_chars and not has_link_invite_or_mention(text, entities)
 
 
 def extract_state(text: str, entities: list[dict[str, Any]]) -> dict[str, Any]:

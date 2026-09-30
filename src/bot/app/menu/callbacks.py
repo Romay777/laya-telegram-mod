@@ -82,6 +82,18 @@ class SensitivityCallback(CallbackData, prefix="chat-sensitivity"):
     level: str | None = None
 
 
+class MinCharsCallback(CallbackData, prefix="chat-min-chars"):
+    """The Minimum Length screen (§13) of one chat.
+
+    `value` is None when the screen is merely opened; otherwise it is the
+    minimum the Admin just picked, in characters — `0` checks every
+    message (§4 step 4).
+    """
+
+    chat_id: int
+    value: int | None = None
+
+
 class BackendCallback(CallbackData, prefix="chat-backend"):
     """The Classifier Backend screen (§5, §13) of one chat.
 

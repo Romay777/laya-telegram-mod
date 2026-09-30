@@ -6,6 +6,7 @@ Jev connection, LOG_LEVEL); Compose builds DATABASE_URL from it. The
 never touch the file, and override it by mounting.
 """
 
+import logging
 import os
 import tomllib
 from collections.abc import Mapping
@@ -68,7 +69,6 @@ class ClassifierSettings:
 
 @dataclass(frozen=True)
 class ModerationSettings:
-    min_words: int = 3
     new_member_hours: int = 24
     new_member_messages: int = 3
 
@@ -179,6 +179,15 @@ class Settings:
 
         jev_api_key = env.get("JEV_API_KEY") or None  # Jev is available only with a key
 
+        moderation_config = dict(config.get("moderation", {}))
+        # `min_words` moved into each chat as `min_chars` (§4 step 4, §13); a
+        # config.toml mounted from before the move must not block startup.
+        if moderation_config.pop("min_words", None) is not None:
+            logging.getLogger(__name__).warning(
+                "config.toml [moderation] min_words is gone: the minimum message "
+                "length is now a per-chat setting in the Menu"
+            )
+
         return cls(
             bot_token=bot_token,
             database_url=database_url,
@@ -191,7 +200,7 @@ class Settings:
             thresholds=thresholds,
             signals=SignalsSettings(**config.get("signals", {})),
             classifier=ClassifierSettings(**config.get("classifier", {})),
-            moderation=ModerationSettings(**config.get("moderation", {})),
+            moderation=ModerationSettings(**moderation_config),
             notices=NoticesSettings(**config.get("notices", {})),
             alerts=AlertsSettings(**config.get("alerts", {})),
             suspicions=SuspicionsSettings(**config.get("suspicions", {})),

@@ -29,6 +29,7 @@ DEFAULT_LADDER: tuple[int, ...] = (3600, 86400, 0)  # 1 hour → 24 hours → fo
 DEFAULT_EXPIRY_SECONDS = 30 * 24 * 60 * 60  # 30 days
 DEFAULT_MODE = "observation"
 DEFAULT_SENSITIVITY = "balanced"
+DEFAULT_MIN_CHARS = 10
 
 
 @dataclass(frozen=True, slots=True)

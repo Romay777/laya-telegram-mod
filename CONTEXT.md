@@ -70,6 +70,10 @@ _Avoid_: detection, score, prediction
 A Linked Chat setting: Lenient, Balanced, or Strict. Each value maps to a pair of confidence thresholds, one for Violations and one for Suspicions.
 _Avoid_: threshold, strictness
 
+**Minimum length**:
+A Linked Chat setting: link-free messages shorter than this many characters are not checked at all. Off (0) checks every message. Characters are counted the way Telegram counts them.
+_Avoid_: min_words, word limit, message limit
+
 **Suspicion**:
 A message whose Verdict falls in the middle confidence band. The message stays in the chat, and an Admin decides whether to Punish or Dismiss it.
 _Avoid_: warning, flag

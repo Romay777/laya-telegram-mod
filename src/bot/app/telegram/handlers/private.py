@@ -27,7 +27,7 @@ from app.domain import ladder_edits
 from app.domain.backends import never_available
 from app.domain.guards import belongs_to_chat
 from app.domain.lifecycle import rights_missing
-from app.domain.linking import REQUIRED_RIGHTS
+from app.domain.linking import DEFAULT_MIN_CHARS, REQUIRED_RIGHTS
 from app.i18n import SUPPORTED_LANGUAGES, translator_for
 from app.linking.admin_cache import AdminCache
 from app.linking.service import FallbackLinkStates, LinkingService
@@ -46,6 +46,7 @@ from app.menu.callbacks import (
     LadderStepCallback,
     MenuAction,
     MenuCallback,
+    MinCharsCallback,
     MyAlertsCallback,
     NoticeTemplateCallback,
     NoticeTemplateCancelCallback,
@@ -59,6 +60,7 @@ from app.menu.callbacks import (
 )
 from app.menu.navigator import MenuNavigator
 from app.menu.screens.home import ChatSummary
+from app.menu.screens.min_chars import MIN_CHARS_PRESETS
 from app.menu.screens.notice_template import (
     strip_custom_emoji,
     validate_template,
@@ -407,6 +409,42 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             chat_id=chat.chat_id,
             chat_title=chat.title,
             sensitivity=await _current_sensitivity(session, chat.chat_id),
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(MinCharsCallback.filter(), F.message.chat.type == "private")
+    async def min_chars(
+        callback: CallbackQuery,
+        callback_data: MinCharsCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+    ) -> None:
+        """Minimum Length (§13): how short a link-free message stays unchecked (§4)."""
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        # Only the presets the screen offers are stored; a stale or
+        # hand-crafted pick is refused server-side, like the Backend's (§13).
+        if callback_data.value in MIN_CHARS_PRESETS:
+            await ChatRepository(session).set_min_chars(chat.chat_id, callback_data.value)
+        await navigator.show_min_chars(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            min_chars=await _current_min_chars(session, chat.chat_id),
             locale=i18n.locale,
         )
         await callback.answer()
@@ -1149,6 +1187,12 @@ async def _current_sensitivity(session: AsyncSession, chat_id: int) -> str:
     """The stored Sensitivity, re-read after a pick so the screen shows it."""
     chat = await ChatRepository(session).get(chat_id)
     return chat.sensitivity if chat is not None else "balanced"
+
+
+async def _current_min_chars(session: AsyncSession, chat_id: int) -> int:
+    """The stored Minimum Length, re-read after a pick so the screen shows it."""
+    chat = await ChatRepository(session).get(chat_id)
+    return chat.min_chars if chat is not None else DEFAULT_MIN_CHARS
 
 
 async def _current_chat_language(session: AsyncSession, chat_id: int) -> str:

@@ -37,6 +37,15 @@ def test_the_shipped_config_toml_carries_the_three_section_three_presets() -> No
     assert settings.thresholds["laya"]["balanced"].suspicion == 0.60
 
 
+def test_a_config_from_before_the_min_chars_move_still_loads(tmp_path: Path) -> None:
+    """`min_words` moved into each chat (§13); a mounted copy must not block startup."""
+    config = _write(tmp_path, "[moderation]\nmin_words = 3\nnew_member_hours = 12\n")
+
+    settings = Settings.load(env=_ENV, config_path=config)
+
+    assert settings.moderation.new_member_hours == 12  # the valid keys stand
+
+
 def test_every_preset_of_the_starting_values_per_backend_and_sensitivity() -> None:
     thresholds = default_thresholds()
 

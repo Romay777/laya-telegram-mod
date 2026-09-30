@@ -224,6 +224,23 @@ async def test_set_sensitivity_stores_the_preset_choice(db_session: AsyncSession
     assert chat is not None and chat.sensitivity == "strict"
 
 
+async def test_set_min_chars_stores_the_minimum(db_session: AsyncSession) -> None:
+    chat_id = next(_chat_ids)
+    repo = ChatRepository(db_session)
+    await repo.create_linked(
+        chat_id=chat_id,
+        title="My Chat",
+        linker_id=77,
+        linked_at=FakeClock().now(),
+        chat_language="en",
+    )
+
+    await repo.set_min_chars(chat_id, 0)
+
+    chat = await repo.get(chat_id)
+    assert chat is not None and chat.min_chars == 0
+
+
 async def test_set_chat_language_stores_the_chat_language(db_session: AsyncSession) -> None:
     chat_id = next(_chat_ids)
     repo = ChatRepository(db_session)
