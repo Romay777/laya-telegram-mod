@@ -35,7 +35,8 @@ def violation_card_screen(
     name = chat_title if chat_title else "—"
     lines = [
         t("menu-card-header", chat=name),
-        t("alert-violation-member", member=card.user_id),
+        # The Member's id is a name, not a quantity: no number grouping.
+        t("alert-violation-member", member=str(card.user_id)),
         t("menu-card-category", category=t(f"category-{card.category}")),
     ]
     if card.confidence is not None:

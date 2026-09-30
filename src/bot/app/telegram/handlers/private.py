@@ -19,6 +19,7 @@ from app.clock import Clock
 from app.config import BACKENDS, SENSITIVITIES
 from app.db.models import BotUser, Chat
 from app.db.repositories.chats import ChatRepository
+from app.db.repositories.journal import JournalRepository
 from app.db.repositories.notice_templates import NoticeTemplateRepository
 from app.db.repositories.subscriptions import AdminSubscriptionRepository
 from app.domain import ladder_edits
@@ -51,6 +52,8 @@ from app.menu.callbacks import (
     NoticeTemplateSaveCallback,
     ObserveCallback,
     SensitivityCallback,
+    StatisticsCallback,
+    ViolationCardCallback,
 )
 from app.menu.navigator import MenuNavigator
 from app.menu.screens.home import ChatSummary
@@ -58,6 +61,7 @@ from app.menu.screens.notice_template import (
     strip_custom_emoji,
     validate_template,
 )
+from app.menu.screens.statistics import WINDOWS
 
 #: The §13 default: the choice offered right after Linking waits 2 days.
 DEFAULT_SUMMARY_AFTER_H = 48
@@ -975,10 +979,10 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
         state: FSMContext,
         clock: Clock,
     ) -> None:
-        """Open journal, from a burst summary (§9).
+        """The Journal (§13): the chat's Violations, newest first, 5 per page.
 
-        The Journal screen itself arrives with its ticket; until then the
-        button lands on the chat's own screen, where the Journal lives (§13).
+        Reached from the Chat screen or a burst summary's Open journal
+        button (§9); `page` says which five to show.
         """
         # Opening the Menu cancels a fallback Linking wait (§13).
         await state.clear()
@@ -988,7 +992,114 @@ def create_private_router(summary_after_h: int = DEFAULT_SUMMARY_AFTER_H) -> Rou
             await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
             return
 
-        await _show_chat_screen(bot, session, navigator, bot_user, chat, i18n, clock=clock)
+        entries, total = await JournalRepository(session).page(
+            chat.chat_id, page=callback_data.page
+        )
+        await navigator.show_journal(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            entries=entries,
+            total=total,
+            page=callback_data.page,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(StatisticsCallback.filter(), F.message.chat.type == "private")
+    async def open_statistics(
+        callback: CallbackQuery,
+        callback_data: StatisticsCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+        clock: Clock,
+    ) -> None:
+        """Statistics (§13): the counts for the last 7 or 30 days.
+
+        A pick of the other window re-renders the screen with it; the
+        numbers always come from the database, so they are current.
+        """
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        days = callback_data.days if callback_data.days in WINDOWS else WINDOWS[0]
+        stats = await JournalRepository(session).statistics(
+            chat.chat_id, since=clock.now() - timedelta(days=days)
+        )
+        await navigator.show_statistics(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            stats=stats,
+            days=days,
+            locale=i18n.locale,
+        )
+        await callback.answer()
+
+    @router.callback_query(ViolationCardCallback.filter(), F.message.chat.type == "private")
+    async def open_violation_card(
+        callback: CallbackQuery,
+        callback_data: ViolationCardCallback,
+        bot: Bot,
+        session: AsyncSession,
+        bot_user: BotUser,
+        navigator: MenuNavigator,
+        admin_cache: AdminCache,
+        i18n: I18nContext,
+        state: FSMContext,
+        clock: Clock,
+    ) -> None:
+        """One Journal entry opened (§13): the Violation's card."""
+        # Opening the Menu cancels a fallback Linking wait (§13).
+        await state.clear()
+
+        chat = await _accessible_chat(bot, admin_cache, session, callback, callback_data.chat_id)
+        if chat is None:
+            await _access_lost(bot, admin_cache, session, navigator, bot_user, callback, i18n)
+            return
+
+        journal = JournalRepository(session)
+        card = await journal.card(callback_data.violation_id, now=clock.now())
+        if card is None or card.chat_id != chat.chat_id:
+            # A stale entry: back to the Journal's first page (§13).
+            entries, total = await journal.page(chat.chat_id, page=0)
+            await navigator.show_journal(
+                bot=bot,
+                session=session,
+                user=bot_user,
+                chat_id=chat.chat_id,
+                chat_title=chat.title,
+                entries=entries,
+                total=total,
+                page=0,
+                locale=i18n.locale,
+            )
+            await callback.answer()
+            return
+        await navigator.show_violation_card(
+            bot=bot,
+            session=session,
+            user=bot_user,
+            chat_id=chat.chat_id,
+            chat_title=chat.title,
+            card=card,
+            page=callback_data.page,
+            locale=i18n.locale,
+        )
         await callback.answer()
 
     @router.message(StateFilter(FallbackLinkStates.waiting_for_chat), F.chat.type == "private")

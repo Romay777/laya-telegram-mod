@@ -15,7 +15,9 @@ from app.alerts.lift import lift_violation
 from app.alerts.suspicion import decide_suspicion
 from app.alerts.unban import unban_channel
 from app.clock import Clock
+from app.db.models import BotUser
 from app.db.repositories.chats import ChatRepository
+from app.db.repositories.journal import JournalRepository
 from app.i18n import translator_for
 from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
@@ -24,6 +26,7 @@ from app.menu.callbacks import (
     SuspicionDecideCallback,
     UnbanChannelCallback,
 )
+from app.menu.navigator import MenuNavigator
 from app.notices.queue import NoticeQueue
 from app.notices.sender import DEFAULT_MAX_LIFETIME_H
 
@@ -40,6 +43,8 @@ def create_alerts_router(max_notice_lifetime_h: int = DEFAULT_MAX_LIFETIME_H) ->
         admin_cache: AdminCache,
         clock: Clock,
         i18n: I18nContext,
+        navigator: MenuNavigator,
+        bot_user: BotUser,
     ) -> None:
         # Every chat-scoped callback re-checks Admin access (§13).
         if not await admin_cache.is_admin(bot, callback_data.chat_id, callback.from_user.id):
@@ -60,6 +65,18 @@ def create_alerts_router(max_notice_lifetime_h: int = DEFAULT_MAX_LIFETIME_H) ->
             locale=i18n.locale,
         )
         if outcome.won:
+            # The Menu shows the same Violation as its card (§13); when the
+            # press came from there, the card is re-rendered to match.
+            await _reshow_card(
+                bot,
+                session,
+                navigator,
+                bot_user,
+                callback,
+                callback_data,
+                clock,
+                i18n,
+            )
             await callback.answer()
             return
         # First click wins (§9): a late click learns who was first.
@@ -156,3 +173,39 @@ def create_alerts_router(max_notice_lifetime_h: int = DEFAULT_MAX_LIFETIME_H) ->
         )
 
     return router
+
+
+async def _reshow_card(
+    bot: Bot,
+    session: AsyncSession,
+    navigator: MenuNavigator,
+    bot_user: BotUser,
+    callback: CallbackQuery,
+    callback_data: LiftRestrictionCallback,
+    clock: Clock,
+    i18n: I18nContext,
+) -> None:
+    """Re-render the Menu's Violation card after a lift from it (§13).
+
+    The lift itself already edited every alert copy (§9); this covers the
+    Menu, whose card shows the same Violation. A press on an alert copy —
+    any message but the Admin's stored Menu one — leaves the Menu alone.
+    """
+    if bot_user.menu_message_id is None or callback.message is None:
+        return
+    if callback.message.message_id != bot_user.menu_message_id:
+        return
+    chat = await ChatRepository(session).get(callback_data.chat_id)
+    card = await JournalRepository(session).card(callback_data.violation_id, now=clock.now())
+    if chat is None or card is None or card.chat_id != chat.chat_id:
+        return
+    await navigator.show_violation_card(
+        bot=bot,
+        session=session,
+        user=bot_user,
+        chat_id=chat.chat_id,
+        chat_title=chat.title,
+        card=card,
+        page=0,
+        locale=i18n.locale,
+    )

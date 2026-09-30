@@ -56,7 +56,9 @@ async def test_the_chat_screen_leads_to_the_mode_switch(
     await app.feed(private_callback_update(admin_id, f"chat:{chat_id}", menu, language_code="en"))
 
     edit = app.session.calls_of("EditMessageText")[-1].method
-    (back,), (settings,) = edit.reply_markup.inline_keyboard
+    (statistics, journal), (back,), (settings,) = edit.reply_markup.inline_keyboard
+    assert statistics.callback_data == f"chat-statistics:{chat_id}:"  # §13: Statistics
+    assert journal.callback_data == f"journal:{chat_id}:0"  # §13: Journal
     assert back.callback_data == "menu:home:"
     assert settings.callback_data == f"chat-settings:{chat_id}"
     app.session.calls.clear()

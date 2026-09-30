@@ -147,9 +147,9 @@ async def test_a_raid_restricts_every_member_at_once_and_groups_the_alerts(
         assert len([a for a in alerts if a.subject_type == "violation"]) == 5
         assert len([a for a in alerts if a.subject_type == "burst"]) == 1
 
-        # The summary's Open journal button opens the chat's screen (§9; the
-        # Journal screen itself arrives with its ticket). The summary lives in
-        # the Admin's private chat, so the press comes from there (§9).
+        # The summary's Open journal button opens the chat's Journal (§9, §13).
+        # The summary lives in the Admin's private chat, so the press comes
+        # from there (§9).
         app.session.calls.clear()
         app.session.script(GetChatMember, member_owner(user(admin_id)))
         await app.feed(
@@ -159,7 +159,7 @@ async def test_a_raid_restricts_every_member_at_once_and_groups_the_alerts(
         )
         (menu_edit,) = app.session.calls_of("EditMessageText")
         assert menu_edit.method.chat_id == admin_id
-        assert "My Chat" in (menu_edit.method.text or "")
+        assert "Journal — My Chat" in (menu_edit.method.text or "")
 
 
 async def test_the_per_minute_limit_holds_sends_back(

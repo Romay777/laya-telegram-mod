@@ -128,7 +128,13 @@ async def test_opening_the_chat_shows_its_screen_without_asking_again(
     assert "Mode: Observation Mode" in text
     assert "Backend: Laya" in text
     assert "Sensitivity: Balanced" in text
-    (back,) = edit.reply_markup.inline_keyboard[0]
+    # Statistics and Journal lead off the Chat screen; Back is among the rest (§13).
+    (back,) = [
+        button
+        for row in edit.reply_markup.inline_keyboard
+        for button in row
+        if button.callback_data == "menu:home:"
+    ]
     assert back.callback_data == "menu:home:"
 
 
