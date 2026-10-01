@@ -13,11 +13,18 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, MessageEntity
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    MessageEntity,
+    ReplyParameters,
+)
 from aiogram_i18n.cores.base import BaseCore
 
 from app.i18n import GetText, translator_for
 from app.menu.callbacks import AppealCallback
+from app.notices.anchor import TOPIC, NoticeAnchor
 from app.notices.template_render import render_notice, render_template_notice
 
 __all__ = ["appeal_keyboard", "removal_time", "render_notice", "send_notice"]
@@ -73,6 +80,7 @@ async def send_notice(
     template_text: str | None = None,
     template_entities: list[dict[str, Any]] | None = None,
     appeal_violation_id: int | None = None,
+    anchor: NoticeAnchor | None = None,
 ) -> Message:
     """Post the Chat Notice in the chat's own language (§15).
 
@@ -80,7 +88,9 @@ async def send_notice(
     the default text applies otherwise. With `appeal_violation_id` the
     notice carries the 🙋 It's a mistake button; without it — no Admin
     receives Appeals, the notice was dropped, or the sender was a channel —
-    the button is left out (§7).
+    the button is left out (§7). The `anchor` places the notice where the
+    Member can see it (§7): a forum topic, or the comment thread under a
+    channel post.
     """
     t = translator_for(core, chat_language)
     text, entities = render_template_notice(
@@ -103,4 +113,24 @@ async def send_notice(
         text=text,
         entities=[MessageEntity.model_validate(entity) for entity in entities],
         reply_markup=markup,
+        **anchor_params(anchor),
     )
+
+
+def anchor_params(anchor: NoticeAnchor | None) -> dict[str, Any]:
+    """The sendMessage parameters that carry the anchor (§7).
+
+    A topic anchor sends with `message_thread_id`; a reply anchor replies
+    at the thread's root with `allow_sending_without_reply` — the root
+    normally survives, but a deleted comment section must not lose the
+    notice outright.
+    """
+    if anchor is None:
+        return {}
+    if anchor.kind == TOPIC:
+        return {"message_thread_id": anchor.message_id}
+    return {
+        "reply_parameters": ReplyParameters(
+            message_id=anchor.message_id, allow_sending_without_reply=True
+        )
+    }

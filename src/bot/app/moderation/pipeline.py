@@ -52,6 +52,7 @@ from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
 from app.moderation import signals
 from app.moderation.actions import ban_sender_chat, delete_message, restrict_member
+from app.notices.anchor import NoticeAnchor, notice_anchor
 from app.notices.jobs import violation_notice
 from app.notices.queue import NoticeQueue
 
@@ -259,6 +260,10 @@ class ModerationPipeline:
             mode=chat.mode,
             enabled_categories=await ChatRepository(session).enabled_categories(chat.chat_id),
         )
+        # §7: where a notice for this message would land — a forum topic or
+        # the comment thread under a channel post — frozen now, from the
+        # message itself, before either producer needs it.
+        anchor = notice_anchor(message)
         # The check itself lands on the Member's row; a flagged Verdict
         # counts as flagged (§3: an Established Member is never flagged).
         await members.note_checked(
@@ -297,6 +302,7 @@ class ModerationPipeline:
                 confidence=decision.confidence,
                 now=now,
                 admin_cache=admin_cache,
+                anchor=anchor,
             )
             return
         if decision.outcome != OUTCOME_VIOLATION:
@@ -388,6 +394,7 @@ class ModerationPipeline:
                 appeal_violation_id=violation.id if appeal_recipient else None,
                 template_text=template.text if template is not None else None,
                 template_entities=template.entities if template is not None else None,
+                anchor=anchor,
             )
         )
         await self._fanout.violation_alert(
@@ -590,6 +597,7 @@ class ModerationPipeline:
         confidence: float,
         now: datetime,
         admin_cache: AdminCache,
+        anchor: NoticeAnchor | None = None,
     ) -> None:
         """The middle band — or anything flagged in Observation Mode (§4, §9).
 
@@ -597,7 +605,8 @@ class ModerationPipeline:
         the later decision, and the Admins subscribed with `all` are asked
         to 🔴 Punish or Dismiss. A message that already has an open
         Suspicion — its original was flagged, then the edit was too — gets
-        no second row and no second alert (§4).
+        no second row and no second alert (§4). The notice anchor (§7) is
+        stored on the row: a later Punish posts the notice there.
         """
         # §4 step 9: the flagged message keeps its text until the retention passes.
         await repo.store_flagged(
@@ -615,6 +624,8 @@ class ModerationPipeline:
             user_id=sender_id,
             message_id=message_id,
             created_at=now,
+            anchor_kind=anchor.kind if anchor is not None else None,
+            anchor_message_id=anchor.message_id if anchor is not None else None,
         )
         await self._fanout.suspicion_alert(
             bot,

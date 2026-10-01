@@ -226,6 +226,10 @@ class Suspicion(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat.chat_id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(BigInteger)
     message_id: Mapped[int] = mapped_column(BigInteger)
+    # Where the Chat Notice lands if an Admin punishes (§7): a forum topic
+    # id, or the comment thread's root message id. None = the chat root.
+    anchor_kind: Mapped[str | None] = mapped_column(String(16))
+    anchor_message_id: Mapped[int | None] = mapped_column(BigInteger)
     # pending | punished | dismissed | expired | superseded (§12).
     status: Mapped[str] = mapped_column(String(16), default="pending")
     decided_by: Mapped[int | None] = mapped_column(BigInteger)

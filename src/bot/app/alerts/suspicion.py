@@ -33,6 +33,7 @@ from app.i18n import translator_for
 from app.lifecycle.service import ChatLifecycleService
 from app.linking.admin_cache import AdminCache
 from app.moderation.actions import restrict_member
+from app.notices.anchor import NoticeAnchor
 from app.notices.jobs import violation_notice
 from app.notices.queue import NoticeQueue
 
@@ -190,6 +191,14 @@ async def _apply_punishment(
         bot, session, admin_cache=admin_cache, chat=chat
     )
     template = await NoticeTemplateRepository(session).get(chat.chat_id)
+    # The anchor was frozen on the Suspicion when it was raised (§7): the
+    # flagged message is usually deleted by now, so the notice still lands
+    # where the Member can see it.
+    anchor = (
+        NoticeAnchor(kind=suspicion.anchor_kind, message_id=suspicion.anchor_message_id)
+        if suspicion.anchor_kind is not None and suspicion.anchor_message_id is not None
+        else None
+    )
     notices.enqueue(
         violation_notice(
             session_maker=session_maker,
@@ -209,6 +218,7 @@ async def _apply_punishment(
             appeal_violation_id=violation.id if appeal_recipient else None,
             template_text=template.text if template is not None else None,
             template_entities=template.entities if template is not None else None,
+            anchor=anchor,
         )
     )
     return not too_old

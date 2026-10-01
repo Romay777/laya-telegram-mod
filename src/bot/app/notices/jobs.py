@@ -24,6 +24,7 @@ from app.alerts.fanout import AlertFanout
 from app.clock import Clock
 from app.db.models import Chat, Violation
 from app.db.repositories.moderation import ModerationRepository
+from app.notices.anchor import NoticeAnchor
 from app.notices.queue import PendingNotice
 from app.notices.sender import removal_time, send_notice
 
@@ -57,6 +58,7 @@ def violation_notice(
     appeal_violation_id: int | None,
     template_text: str | None = None,
     template_entities: list[dict[str, Any]] | None = None,
+    anchor: NoticeAnchor | None = None,
     record_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> PendingNotice:
     """The queue's job for one Violation's Chat Notice, enqueued now (§7).
@@ -65,7 +67,8 @@ def violation_notice(
     session is gone — so each opens its own session. The template and the
     appeal button are part of the job: the producers decide, before
     enqueueing, whether an Appeal would reach an Admin (§7) and read the
-    template while their own session is open.
+    template while their own session is open. The `anchor` rides along the
+    same way: where the notice lands is decided at enqueue time (§7).
     """
 
     async def send() -> None:
@@ -90,6 +93,7 @@ def violation_notice(
             template_text=template_text,
             template_entities=template_entities,
             appeal_violation_id=appeal_violation_id,
+            anchor=anchor,
         )
         await _record(notice.message_id)
 

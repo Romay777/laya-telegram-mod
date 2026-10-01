@@ -111,7 +111,7 @@ _Avoid_: reset, amnesty
 ### Communication
 
 **Chat Notice**:
-The bot's message in a Linked Chat announcing a Member's Violation and Restriction, carrying the Appeal button. It is removed when the Restriction ends or the Appeal is resolved.
+The bot's message in a Linked Chat announcing a Member's Violation and Restriction, carrying the Appeal button. It is posted where the Member can still see it — a forum topic, or the comment thread under a channel post — and is removed when the Restriction ends or the Appeal is resolved.
 _Avoid_: warning, alert
 
 **Notice Template**:

@@ -283,6 +283,18 @@ The notice text is the chat's Notice Template if one is set, and the default tex
 - **Default, `en`:** `{user}, it looks like your message {reason}. You can't write here for {duration}.`
 - **Default, `ru`:** `{user}, кажется, ваше сообщение {reason}. Вы не можете писать в чат {duration}.`
 
+`{user}` renders as a `text_mention` of the Member's display name — a real mention that works without a username.
+
+### Placement
+
+The notice lands where the Member can still see it, frozen from the flagged message at Violation time (or when the Suspicion is raised):
+
+- a message in a **forum topic** sends with `message_thread_id`;
+- a **comment under a channel post** sends as a reply to its thread's root — the auto-forwarded copy of the post, whose id the comment carries as its own `message_thread_id`. The root survives the comment's deletion, and the reply carries `allow_sending_without_reply`;
+- anything else sends into the chat root, as before.
+
+The anchor is stored on the `suspicion` row, because a Punish may come hours later, after the flagged message is gone.
+
 The notice carries one inline button:
 
 - `🙋 It's a mistake` (`en`) or `🙋 Это ошибка` (`ru`), in the Chat Language.
@@ -436,7 +448,7 @@ Every chat-scoped table carries a `chat_id` foreign key with `ON DELETE CASCADE`
 | `member` | (`chat_id`, `user_id`) PK, `first_seen_at`, `checked_count`, `flagged_count` |
 | `message_check` | `id`, `chat_id`, `user_id` \| `sender_chat_id`, `message_id`, `is_edit`, `backend`, `model`, `spec_version`, `outcome` (`clean`\|`suspicion`\|`violation`\|`skipped_short`\|`skipped_timeout`\|`skipped_overload`\|`skipped_unavailable`), `category`, `confidence`, `probabilities` jsonb, `latency_ms`, `created_at`. **No text.** |
 | `flagged_message` | `check_id` PK/FK, `text`, `entities` jsonb, `purge_at` |
-| `suspicion` | `id`, `check_id`, `chat_id`, `user_id`, `message_id`, `status` (`pending`\|`punished`\|`dismissed`\|`expired`\|`superseded`), `decided_by`, `decided_at` |
+| `suspicion` | `id`, `check_id`, `chat_id`, `user_id`, `message_id`, `anchor_kind` (`topic`\|`reply`, null = chat root), `anchor_message_id`, `status` (`pending`\|`punished`\|`dismissed`\|`expired`\|`superseded`), `decided_by`, `decided_at` |
 | `violation` | `id`, `chat_id`, `user_id` \| `sender_chat_id`, `check_id`, `category`, `source` (`auto`\|`admin`), `step_index`, `restriction_seconds` (0 = forever, null = sender-chat ban), `restricted_until`, `expires_at`, `revoked_at`, `revoked_by`, `notice_dropped`, `created_at` |
 | `chat_notice` | `violation_id` PK, `message_id`, `delete_at`, `deleted_at` |
 | `appeal` | `id`, `violation_id` UNIQUE, `status` (`pending`\|`approved`\|`rejected`), `decided_by`, `created_at`, `decided_at` |

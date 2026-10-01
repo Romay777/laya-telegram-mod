@@ -26,13 +26,21 @@ class SuspicionRepository:
         user_id: int,
         message_id: int,
         created_at: datetime,
+        anchor_kind: str | None = None,
+        anchor_message_id: int | None = None,
     ) -> Suspicion:
-        """One open Suspicion for a flagged message (§4 step 9 stores the text)."""
+        """One open Suspicion for a flagged message (§4 step 9 stores the text).
+
+        The notice anchor (§7) is frozen here, from the flagged message
+        itself: by the time an Admin punishes, the message may be long gone.
+        """
         suspicion = Suspicion(
             check_id=check_id,
             chat_id=chat_id,
             user_id=user_id,
             message_id=message_id,
+            anchor_kind=anchor_kind,
+            anchor_message_id=anchor_message_id,
             created_at=created_at,
         )
         self.session.add(suspicion)

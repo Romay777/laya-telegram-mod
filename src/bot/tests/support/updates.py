@@ -161,8 +161,16 @@ def group_message_update(
     from_bot: bool = False,
     entities: list[MessageEntity] | None = None,
     date: datetime | None = None,
+    message_thread_id: int | None = None,
+    is_topic_message: bool | None = None,
+    reply_to_message: Message | None = None,
 ) -> Update:
-    """A text message from a Member of a Linked Chat (or from a bot in it)."""
+    """A text message from a Member of a Linked Chat (or from a bot in it).
+
+    The thread fields shape where a Chat Notice for this message would
+    land (§7): a forum topic, a comment under a channel post, or a plain
+    message.
+    """
     return Update(
         update_id=0,
         message=Message(
@@ -172,7 +180,22 @@ def group_message_update(
             from_user=User(id=sender_id, is_bot=from_bot, first_name=sender_name),
             text=text,
             entities=entities,
+            message_thread_id=message_thread_id,
+            is_topic_message=is_topic_message,
+            reply_to_message=reply_to_message,
         ),
+    )
+
+
+def auto_forwarded_post(chat_id: int, message_id: int) -> Message:
+    """The discussion group's copy of a channel post (§7): the comment root."""
+    return Message(
+        message_id=message_id,
+        date=datetime.now(UTC),
+        chat=Chat(id=chat_id, type="supergroup", title="My Chat"),
+        sender_chat=Chat(id=chat_id, type="channel", title="My Channel"),
+        is_automatic_forward=True,
+        text="A channel post",
     )
 
 
